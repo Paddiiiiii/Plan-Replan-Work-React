@@ -5,6 +5,15 @@ import requests
 import json
 
 
+def save_task_to_rag(context_manager: ContextManager, user_task: str, plan: Dict):
+    """保存任务到tasks集合"""
+    context_manager.add_to_rag(
+        user_task,
+        {"type": "task", "plan": json.dumps(plan)},
+        collection="tasks"
+    )
+
+
 class PlanModule:
     def __init__(self, context_manager: ContextManager):
         self.context_manager = context_manager
@@ -49,11 +58,29 @@ class PlanModule:
         response = self._call_llm(messages)
         plan = self._parse_plan(response)
         
-        self.context_manager.add_to_rag(
-            user_task,
-            {"type": "task", "plan": json.dumps(plan)},
-            collection="tasks"
-        )
+        # 将匹配的规则信息添加到plan中
+        plan["matched_rules"] = []
+        if rag_knowledge:
+            for ctx in rag_knowledge:
+                plan["matched_rules"].append({
+                    "text": ctx.get("text", ""),
+                    "metadata": ctx.get("metadata", {})
+                })
+        
+        plan["matched_equipment"] = []
+        if rag_equipment:
+            for ctx in rag_equipment:
+                plan["matched_equipment"].append({
+                    "text": ctx.get("text", ""),
+                    "metadata": ctx.get("metadata", {})
+                })
+        
+        # 不再自动保存，由用户决定是否保存
+        # self.context_manager.add_to_rag(
+        #     user_task,
+        #     {"type": "task", "plan": json.dumps(plan)},
+        #     collection="tasks"
+        # )
         
         return plan
     

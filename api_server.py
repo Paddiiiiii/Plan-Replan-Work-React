@@ -70,6 +70,10 @@ class KnowledgeAddRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
     collection: str = Field(default="knowledge", description="集合名称")
 
+class SaveTaskRequest(BaseModel):
+    task: str = Field(..., description="任务描述")
+    plan: Dict[str, Any] = Field(..., description="计划内容")
+
 @app.get("/")
 async def root():
     return {
@@ -87,6 +91,7 @@ async def root():
             "/api/knowledge/update": "PUT - 批量更新knowledge集合",
             "/api/results": "GET - 获取所有结果文件列表",
             "/api/results/{filename}": "GET - 获取特定结果文件内容",
+            "/api/task/save": "POST - 保存任务到tasks集合",
             "/docs": "GET - API文档"
         }
     }
@@ -290,6 +295,22 @@ async def delete_knowledge(item_id: str, collection: str = "knowledge"):
     except Exception as e:
         logger.error(f"从{collection}集合删除记录失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除记录失败: {str(e)}")
+
+@app.post("/api/task/save")
+async def save_task(request: SaveTaskRequest):
+    """保存任务到tasks集合"""
+    try:
+        from plan import save_task_to_rag
+        save_task_to_rag(context_manager, request.task, request.plan)
+        logger.info(f"成功保存任务到tasks集合: {request.task[:50]}...")
+        
+        return {
+            "success": True,
+            "message": "任务已保存到tasks集合"
+        }
+    except Exception as e:
+        logger.error(f"保存任务失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"保存任务失败: {str(e)}")
 
 @app.put("/api/knowledge/update")
 async def update_knowledge_base():

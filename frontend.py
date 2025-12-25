@@ -152,6 +152,24 @@ def main():
                     for i, step in enumerate(steps, 1):
                         st.write(f"{i}. {step.get('description', step.get('type', 'N/A'))}")
                 
+                # 显示匹配的规则
+                if plan.get('matched_rules'):
+                    st.markdown("### 匹配的部署规则")
+                    for idx, rule in enumerate(plan.get('matched_rules', []), 1):
+                        with st.expander(f"规则 {idx}: {rule.get('metadata', {}).get('unit', '未知单位')}", expanded=False):
+                            st.write(rule.get('text', ''))
+                            if rule.get('metadata'):
+                                st.json(rule.get('metadata'))
+                
+                # 显示匹配的装备信息
+                if plan.get('matched_equipment'):
+                    st.markdown("### 匹配的装备信息")
+                    for idx, equipment in enumerate(plan.get('matched_equipment', []), 1):
+                        with st.expander(f"装备 {idx}: {equipment.get('metadata', {}).get('unit', '未知装备')}", expanded=False):
+                            st.write(equipment.get('text', ''))
+                            if equipment.get('metadata'):
+                                st.json(equipment.get('metadata'))
+                
                 st.markdown("---")
                 st.subheader("提出修改意见（可选）")
                 feedback = st.text_area(
@@ -256,12 +274,142 @@ def main():
                                         with col3:
                                             total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
                                             st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+                                        
+                                        # 显示筛选参数值
+                                        st.subheader("筛选参数")
+                                        filter_params = {}
+                                        
+                                        # 从执行结果中提取参数
+                                        if work_result.get("results"):
+                                            for step_result in work_result.get("results", []):
+                                                if step_result.get("success"):
+                                                    tool_name = step_result.get("tool", "")
+                                                    result_data = step_result.get("result", {})
+                                                    
+                                                    if tool_name == "buffer_filter_tool":
+                                                        # 从结果路径中提取buffer_distance，或从执行记录中获取
+                                                        filter_params["缓冲区距离"] = "已应用"
+                                                    elif tool_name == "elevation_filter_tool":
+                                                        # 尝试从结果中获取高程信息
+                                                        if 'elevation' in gdf.columns:
+                                                            min_elev = gdf['elevation'].min() if not gdf.empty else None
+                                                            max_elev = gdf['elevation'].max() if not gdf.empty else None
+                                                            if min_elev is not None and max_elev is not None:
+                                                                filter_params["高程范围"] = f"{min_elev:.0f} - {max_elev:.0f} 米"
+                                                    elif tool_name == "slope_filter_tool":
+                                                        if 'slope_deg' in gdf.columns:
+                                                            min_slope = gdf['slope_deg'].min() if not gdf.empty else None
+                                                            max_slope = gdf['slope_deg'].max() if not gdf.empty else None
+                                                            if min_slope is not None and max_slope is not None:
+                                                                filter_params["坡度范围"] = f"{min_slope:.1f}° - {max_slope:.1f}°"
+                                                    elif tool_name == "vegetation_filter_tool":
+                                                        if 'vegetation_type' in gdf.columns:
+                                                            veg_types = gdf['vegetation_type'].unique() if not gdf.empty else []
+                                                            if len(veg_types) > 0:
+                                                                filter_params["植被类型"] = ", ".join([str(v) for v in veg_types[:5]])  # 最多显示5种
+                                        
+                                        # 从plan中提取参数（更准确）
+                                        if plan.get("steps"):
+                                            for step in plan.get("steps", []):
+                                                step_params = step.get("params", {})
+                                                if step.get("tool") == "buffer_filter_tool":
+                                                    if "buffer_distance" in step_params:
+                                                        filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
+                                                elif step.get("tool") == "elevation_filter_tool":
+                                                    min_elev = step_params.get("min_elev")
+                                                    max_elev = step_params.get("max_elev")
+                                                    if min_elev is not None or max_elev is not None:
+                                                        elev_str = ""
+                                                        if min_elev is not None:
+                                                            elev_str += f"{min_elev} 米"
+                                                        if max_elev is not None:
+                                                            if elev_str:
+                                                                elev_str += " - "
+                                                            elev_str += f"{max_elev} 米"
+                                                        filter_params["高程范围"] = elev_str
+                                                elif step.get("tool") == "slope_filter_tool":
+                                                    min_slope = step_params.get("min_slope")
+                                                    max_slope = step_params.get("max_slope")
+                                                    if min_slope is not None or max_slope is not None:
+                                                        slope_str = ""
+                                                        if min_slope is not None:
+                                                            slope_str += f"{min_slope}°"
+                                                        if max_slope is not None:
+                                                            if slope_str:
+                                                                slope_str += " - "
+                                                            slope_str += f"{max_slope}°"
+                                                        filter_params["坡度范围"] = slope_str
+                                                elif step.get("tool") == "vegetation_filter_tool":
+                                                    veg_types = step_params.get("vegetation_types", [])
+                                                    exclude_types = step_params.get("exclude_types", [])
+                                                    if veg_types:
+                                                        # 映射植被类型编码到名称
+                                                        veg_names = {
+                                                            10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                            50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                            80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                        }
+                                                        veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                        filter_params["植被类型"] = ", ".join(veg_list)
+                                                    elif exclude_types:
+                                                        veg_names = {
+                                                            10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                            50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                            80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                        }
+                                                        exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                        filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                        
+                                        if filter_params:
+                                            param_cols = st.columns(len(filter_params))
+                                            for idx, (key, value) in enumerate(filter_params.items()):
+                                                with param_cols[idx]:
+                                                    st.metric(key, value)
                                 
                                 st.markdown("---")
-                                if st.button("开始新任务"):
-                                    st.session_state.current_plan = None
-                                    st.session_state.current_stage = "input"
-                                    st.rerun()
+                                
+                                # 保存对话询问
+                                if "show_save_dialog" not in st.session_state:
+                                    st.session_state.show_save_dialog = False
+                                
+                                if st.session_state.show_save_dialog:
+                                    # 显示保存对话框
+                                    st.info("💾 是否保存本次对话到任务历史？")
+                                    save_col1, save_col2, save_col3 = st.columns([1, 1, 2])
+                                    with save_col1:
+                                        if st.button("是，保存", key="save_task_yes", type="primary"):
+                                            try:
+                                                save_response = requests.post(
+                                                    f"{API_URL}/api/task/save",
+                                                    json={
+                                                        "task": st.session_state.task_input,
+                                                        "plan": st.session_state.current_plan
+                                                    },
+                                                    timeout=30
+                                                )
+                                                if save_response.status_code == 200:
+                                                    st.success("✓ 已保存到任务历史")
+                                                    time.sleep(0.5)
+                                                else:
+                                                    st.error("保存失败")
+                                            except Exception as e:
+                                                st.error(f"保存失败: {e}")
+                                            
+                                            st.session_state.current_plan = None
+                                            st.session_state.current_stage = "input"
+                                            st.session_state.show_save_dialog = False
+                                            st.rerun()
+                                    with save_col2:
+                                        if st.button("不保存", key="save_task_no"):
+                                            st.session_state.current_plan = None
+                                            st.session_state.current_stage = "input"
+                                            st.session_state.show_save_dialog = False
+                                            st.rerun()
+                                else:
+                                    # 显示开始新任务按钮
+                                    if st.button("开始新任务", type="primary"):
+                                        st.session_state.show_save_dialog = True
+                                        st.rerun()
                             else:
                                 st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
                                 if st.button("返回修改计划"):
