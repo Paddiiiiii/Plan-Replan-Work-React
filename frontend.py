@@ -17,7 +17,7 @@ RESULT_DIR = BASE_DIR / "result"
 
 try:
     st.set_page_config(
-        page_title="空地智能体系统",
+        page_title="部署智能体",
         page_icon="🤖",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -80,7 +80,7 @@ def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
         return None
 
 def main():
-    st.title("🤖 空地智能体系统")
+    st.title("🤖 部署智能体系统")
     st.markdown("---")
     
     tab1, tab2, tab3, tab4 = st.tabs(["智能体任务", "历史结果", "数据库管理", "API接口"])

@@ -69,9 +69,10 @@ class ReplanModule:
     "goal": "调整后的任务目标",
     "steps": [
         {{"step_id": 1, "tool": "buffer_filter_tool", "params": {{"buffer_distance": 500}}}},
+        {{"step_id": 2, "tool": "vegetation_filter_tool", "params": {{"input_geojson_path": "...", "vegetation_types": [30]}}}},
         ...
     ],
-    "required_tools": ["buffer_filter_tool"],
+    "required_tools": ["buffer_filter_tool", "vegetation_filter_tool"],
     "reason": "重新规划的原因"
 }}"""
             

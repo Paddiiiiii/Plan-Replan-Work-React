@@ -64,15 +64,15 @@
                      │
 ┌────────────────────▼────────────────────────────────────┐
 │                 工具执行层                                │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐   │
-│  │BufferFilter  │ │ElevationFilter│ │SlopeFilter  │   │
-│  │Tool          │ │Tool            │ │Tool         │   │
-│  └──────────────┘ └──────────────┘ └──────────────┘   │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │
+│  │BufferFilter  │ │ElevationFilter│ │SlopeFilter  │ │VegetationFilter││
+│  │Tool          │ │Tool            │ │Tool         │ │Tool            ││
+│  └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘ │
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌────────────────────▼────────────────────────────────────┐
 │              数据与知识层                                │
-│  - OSM地理数据  - DEM高程数据  - ChromaDB向量数据库      │
+│  - OSM地理数据  - DEM高程数据  - WorldCover植被数据  - ChromaDB向量数据库 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -161,7 +161,7 @@ ReAct架构的执行器：
 
 ### 工具系统
 
-三个地理空间筛选工具，支持链式调用：
+四个地理空间筛选工具，支持链式调用：
 
 1. **buffer_filter_tool** - 缓冲区筛选
    - 根据建筑和道路距离筛选空地区域
@@ -176,6 +176,12 @@ ReAct架构的执行器：
 3. **slope_filter_tool** - 坡度筛选
    - 根据坡度范围筛选区域
    - 参数：`input_geojson_path`（必需），`min_slope`，`max_slope`（可选）
+   - 支持链式调用（使用前序工具的输出）
+
+4. **vegetation_filter_tool** - 植被筛选
+   - 根据植被类型筛选区域（基于ESA WorldCover 2020数据）
+   - 参数：`input_geojson_path`（必需），`vegetation_types`（可选，数组），`exclude_types`（可选，数组）
+   - 支持11种土地覆盖类型：树(10)、灌木(20)、草地(30)、耕地(40)、建筑(50)、裸地/稀疏植被(60)、雪/冰(70)、水体(80)、湿地(90)、苔原(95)、永久性水体(100)
    - 支持链式调用（使用前序工具的输出）
 
 ### API服务层
@@ -277,9 +283,11 @@ AIgen/
 │   ├── agent.py             # ReAct执行智能体
 │   └── tools/               # 工具集合
 │       ├── base_tool.py     # 工具基类
+│       ├── base_tool.py     # 工具基类
 │       ├── buffer_filter_tool.py
 │       ├── elevation_filter_tool.py
-│       └── slope_filter_tool.py
+│       ├── slope_filter_tool.py
+│       └── vegetation_filter_tool.py
 ├── data/                    # 数据目录
 │   ├── nj_merged.osm        # OSM地理数据
 │   └── dem.tif              # DEM高程数据
@@ -329,8 +337,10 @@ AIgen/
 │  └─ 选择buffer_filter_tool，参数buffer_distance=200（取中值）
 ├─ Step 2: Think → 分析"筛选中等高程区域"
 │  └─ 选择elevation_filter_tool，使用Step1的输出作为输入
-└─ Step 3: Think → 分析"筛选缓坡或平缓地形"
-   └─ 选择slope_filter_tool，使用Step2的输出作为输入
+├─ Step 3: Think → 分析"筛选缓坡或平缓地形"
+│  └─ 选择slope_filter_tool，使用Step2的输出作为输入
+└─ Step 4: Think → 分析"筛选草地或裸地类型"
+   └─ 选择vegetation_filter_tool，使用Step3的输出作为输入，参数vegetation_types=[30, 60]
 ```
 
 **4. 结果输出**

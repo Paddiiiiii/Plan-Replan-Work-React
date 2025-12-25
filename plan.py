@@ -90,6 +90,8 @@ class PlanModule:
             steps.append({"step_id": len(steps) + 1, "description": "根据高程范围筛选", "type": "elevation"})
         if "坡度" in response or "倾斜" in response:
             steps.append({"step_id": len(steps) + 1, "description": "根据坡度范围筛选", "type": "slope"})
+        if "植被" in response or "草地" in response or "林地" in response or "树木" in response or "耕地" in response or "裸地" in response or "水体" in response:
+            steps.append({"step_id": len(steps) + 1, "description": "根据植被类型筛选", "type": "vegetation"})
         
         return {
             "task": "",

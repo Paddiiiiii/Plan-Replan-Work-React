@@ -1,5 +1,5 @@
 from typing import Dict, List, Any, Optional
-from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 from context_manager import ContextManager
 from config import LLM_CONFIG
 import requests
@@ -12,7 +12,8 @@ class WorkAgent:
         self.tools = {
             "buffer_filter_tool": BufferFilterTool(),
             "elevation_filter_tool": ElevationFilterTool(),
-            "slope_filter_tool": SlopeFilterTool()
+            "slope_filter_tool": SlopeFilterTool(),
+            "vegetation_filter_tool": VegetationFilterTool()
         }
     
     def execute_plan(self, plan: Dict) -> Dict[str, Any]:
@@ -33,7 +34,7 @@ class WorkAgent:
                     if "input_geojson_path" not in step["params"] or not step["params"]["input_geojson_path"]:
                         step["params"]["input_geojson_path"] = last_result_path
             # 兼容旧的type方式
-            elif last_result_path and step.get("type") in ["elevation", "slope"]:
+            elif last_result_path and step.get("type") in ["elevation", "slope", "vegetation"]:
                 if "params" not in step:
                     step["params"] = {}
                 step["params"]["input_geojson_path"] = last_result_path
