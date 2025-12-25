@@ -10,7 +10,7 @@ if str(BASE_DIR_PARENT) not in sys.path:
     sys.path.insert(0, str(BASE_DIR_PARENT))
 
 try:
-    from AIgen.context_manager import ContextManager
+    from context_manager import ContextManager
 except ImportError:
     from context_manager import ContextManager
 

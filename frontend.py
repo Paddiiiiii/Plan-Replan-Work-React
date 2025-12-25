@@ -26,6 +26,8 @@ except Exception:
     pass
 
 API_URL = "http://localhost:8000"
+# 前端调用后端API的超时时间（秒），应大于LLM请求的超时时间
+API_TIMEOUT = 240  # 比config.py中的LLM timeout(180)稍长一些
 
 def load_geojson(file_path: str):
     try:
@@ -109,7 +111,7 @@ def main():
                         response = requests.post(
                             f"{API_URL}/api/plan",
                             json={"task": task_input},
-                            timeout=60
+                            timeout=API_TIMEOUT
                         )
                         
                         if response.status_code == 200:
@@ -170,7 +172,7 @@ def main():
                                 response = requests.post(
                                     f"{API_URL}/api/replan",
                                     json={"plan": plan, "feedback": feedback},
-                                    timeout=60
+                                    timeout=API_TIMEOUT
                                 )
                                 
                                 if response.status_code == 200:
@@ -343,7 +345,7 @@ def main():
                     try:
                         response = requests.put(
                             f"{API_URL}/api/knowledge/update",
-                            timeout=60
+                            timeout=API_TIMEOUT
                         )
                         if response.status_code == 200:
                             result = response.json()
@@ -360,11 +362,7 @@ def main():
                         st.error(f"连接API失败: {e}")
         
         st.markdown("---")
-        
-        # 只在明确需要加载数据时才执行 API 请求
-        # tab3_should_load 标志确保只在用户明确操作（如切换集合、刷新等）时才加载
-        # 这样可以避免在 rerun 时（如点击"开始新任务"）不必要地加载数据
-        # 如果 db_data 是 None 且 tab3_should_load 是 False，说明是首次访问，也应该加载
+
         should_load = (
             st.session_state.tab3_should_load or 
             (st.session_state.db_data is None and not st.session_state.tab3_should_load)
