@@ -93,7 +93,7 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "计算距离建筑和道路500米以上的空地，高程在100-500米之间"
+            st.session_state.task_input = "帮我找找无人机可以部署在哪里"
         
         if st.session_state.current_stage == "input":
             st.subheader("步骤1: 输入任务")
@@ -121,9 +121,14 @@ def main():
                                 st.session_state.current_stage = "plan_review"
                                 st.rerun()
                             else:
-                                st.error("生成计划失败")
+                                st.error(f"生成计划失败: {result.get('message', '未知错误')}")
                         else:
-                            st.error(f"API请求失败: {response.status_code}")
+                            try:
+                                error_detail = response.json()
+                                error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
+                            except:
+                                error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
+                            st.error(f"API请求失败: {error_msg}")
                     except requests.exceptions.RequestException as e:
                         st.error(f"连接API失败: {e}")
         
@@ -271,40 +276,99 @@ def main():
     with tab2:
         st.header("历史结果")
         
-        if RESULT_DIR.exists():
-            result_files = list(RESULT_DIR.glob("*.geojson"))
-            result_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            
-            if result_files:
-                selected_file = st.selectbox(
+        if "results_list" not in st.session_state:
+            st.session_state.results_list = None
+        if "results_refresh_key" not in st.session_state:
+            st.session_state.results_refresh_key = 0
+        
+        col1, col2 = st.columns([2, 1])
+        with col2:
+            if st.button("刷新列表", key="refresh_results"):
+                st.session_state.results_list = None
+                st.session_state.results_refresh_key += 1
+                st.rerun()
+        
+        # 从API获取结果文件列表
+        if st.session_state.results_list is None:
+            with st.spinner("正在加载结果文件列表..."):
+                try:
+                    response = requests.get(
+                        f"{API_URL}/api/results",
+                        timeout=30
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("success"):
+                            st.session_state.results_list = result.get("results", [])
+                        else:
+                            st.error("获取结果列表失败")
+                            st.session_state.results_list = []
+                    else:
+                        st.error(f"API请求失败: {response.status_code}")
+                        st.session_state.results_list = []
+                except requests.exceptions.RequestException as e:
+                    st.error(f"连接API失败: {e}")
+                    st.info("请确保后端服务已启动（运行 main.py）")
+                    st.session_state.results_list = []
+        
+        if st.session_state.results_list:
+            if len(st.session_state.results_list) > 0:
+                result_options = {f"{r['filename']} ({r['modified_time_str']})": r['filename'] 
+                                  for r in st.session_state.results_list}
+                selected_display = st.selectbox(
                     "选择结果文件",
-                    options=result_files,
-                    format_func=lambda x: f"{x.name} ({time.ctime(x.stat().st_mtime)})"
+                    options=list(result_options.keys())
                 )
                 
-                if selected_file:
-                    gdf = load_geojson(str(selected_file))
+                if selected_display:
+                    selected_filename = result_options[selected_display]
                     
-                    if gdf is not None:
-                        st.subheader("地图显示")
-                        m = create_map(gdf)
-                        if m:
-                            st.components.v1.html(m._repr_html_(), height=600)
-                        
-                        st.subheader("数据统计")
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("区域数量", len(gdf))
-                        with col2:
-                            total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
-                            st.metric("总面积 (m²)", f"{total_area:,.0f}")
-                        with col3:
-                            total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
-                            st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+                    # 从API获取文件内容
+                    with st.spinner("正在加载结果文件..."):
+                        try:
+                            response = requests.get(
+                                f"{API_URL}/api/results/{selected_filename}",
+                                timeout=30
+                            )
+                            if response.status_code == 200:
+                                # 保存为临时文件用于显示
+                                import tempfile
+                                with tempfile.NamedTemporaryFile(mode='w', suffix='.geojson', delete=False) as tmp_file:
+                                    tmp_file.write(response.text)
+                                    tmp_path = tmp_file.name
+                                
+                                gdf = load_geojson(tmp_path)
+                                
+                                # 清理临时文件
+                                try:
+                                    os.unlink(tmp_path)
+                                except:
+                                    pass
+                                
+                                if gdf is not None:
+                                    st.subheader("地图显示")
+                                    m = create_map(gdf)
+                                    if m:
+                                        st.components.v1.html(m._repr_html_(), height=600)
+                                    
+                                    st.subheader("数据统计")
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("区域数量", len(gdf))
+                                    with col2:
+                                        total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
+                                        st.metric("总面积 (m²)", f"{total_area:,.0f}")
+                                    with col3:
+                                        total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
+                                        st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+                            else:
+                                st.error(f"获取结果文件失败: {response.status_code}")
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"连接API失败: {e}")
             else:
                 st.info("暂无历史结果文件")
         else:
-            st.info("结果目录不存在")
+            st.info("正在加载结果文件列表...")
     
     with tab3:
         st.header("数据库管理")
@@ -530,51 +594,254 @@ def main():
     with tab4:
         st.header("API接口文档")
         st.markdown("""
-        ### 智能体接口
+        ## 智能体任务接口
         
-        1. **POST /api/plan** - 生成计划
-           - 请求体: `{"task": "任务描述"}`
-           - 返回: 计划结果
+        ### 1. POST /api/plan - 生成计划
+        **功能**: 根据用户任务描述生成执行计划
         
-        2. **POST /api/replan** - 根据反馈重新规划
-           - 请求体: `{"plan": {...}, "feedback": "修改意见"}`
-           - 返回: 新计划
+        **请求体**:
+        ```json
+        {
+            "task": "任务描述"
+        }
+        ```
         
-        3. **POST /api/execute** - 执行计划
-           - 请求体: `{"plan": {...}}`
-           - 返回: 执行结果
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "result": {
+                "plan": {
+                    "task": "任务描述",
+                    "goal": "任务目标",
+                    "steps": [...],
+                    "estimated_steps": 2
+                }
+            },
+            "message": "计划生成完成"
+        }
+        ```
         
-        4. **POST /api/task** - 提交任务（完整流程）
-           - 请求体: `{"task": "任务描述"}`
-           - 返回: 执行结果
+        ### 2. POST /api/replan - 根据反馈重新规划
+        **功能**: 根据用户反馈或执行失败情况重新规划
         
-        5. **GET /api/tools** - 获取可用工具列表
+        **请求体**:
+        ```json
+        {
+            "plan": {...},
+            "feedback": "修改意见"
+        }
+        ```
         
-        ### 数据库管理接口
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "result": {
+                "plan": {...}
+            },
+            "message": "重新规划完成"
+        }
+        ```
         
-        6. **GET /api/collections** - 获取所有集合信息
-           - 返回: 所有集合的名称和记录数
+        ### 3. POST /api/execute - 执行计划
+        **功能**: 执行已生成的计划
         
-        7. **GET /api/knowledge** - 获取集合数据
-           - 查询参数: `collection` (knowledge/tasks/executions)
-           - 返回: 集合中的所有记录
+        **请求体**:
+        ```json
+        {
+            "plan": {...}
+        }
+        ```
         
-        8. **POST /api/knowledge** - 添加数据到集合
-           - 请求体: `{"text": "文本内容", "metadata": {...}, "collection": "knowledge"}`
-           - 返回: 添加成功信息和新记录ID
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "result": {
+                "result": {
+                    "success": true,
+                    "final_result_path": "result/xxx.geojson",
+                    "results": [...]
+                }
+            },
+            "message": "执行完成"
+        }
+        ```
         
-        9. **DELETE /api/knowledge/{id}** - 删除记录
-           - 路径参数: `id` (记录ID)
-           - 查询参数: `collection` (集合名称)
-           - 返回: 删除成功信息
+        ### 4. POST /api/task - 提交任务（完整流程）
+        **功能**: 一次性完成计划生成和执行（跳过审查步骤）
         
-        10. **PUT /api/knowledge/update** - 批量更新knowledge集合
-            - 调用 `update_knowledge_base()` 重新初始化军事单位部署规则
-            - 返回: 更新记录数
+        **请求体**:
+        ```json
+        {
+            "task": "任务描述"
+        }
+        ```
         
-        ### API地址
-        - 后端服务: http://localhost:8000
-        - API文档: http://localhost:8000/docs
+        **返回**: 同 `/api/execute` 接口
+        
+        ### 5. GET /api/tools - 获取可用工具列表
+        **功能**: 获取系统中所有可用的工具及其参数说明
+        
+        **返回**:
+        ```json
+        {
+            "tools": {
+                "buffer_filter_tool": {
+                    "name": "buffer_filter_tool",
+                    "description": "...",
+                    "parameters": {...}
+                },
+                ...
+            }
+        }
+        ```
+        
+        ## 结果文件管理接口
+        
+        ### 6. GET /api/results - 获取所有结果文件列表
+        **功能**: 获取result目录下所有GeoJSON结果文件的列表
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "results": [
+                {
+                    "filename": "xxx.geojson",
+                    "size": 12345,
+                    "modified_time": 1234567890,
+                    "modified_time_str": "2025-01-01 12:00:00"
+                }
+            ],
+            "count": 1
+        }
+        ```
+        
+        ### 7. GET /api/results/{filename} - 获取特定结果文件内容
+        **功能**: 下载指定的GeoJSON结果文件
+        
+        **路径参数**: `filename` - 文件名（如 `buffer_filter_500m_20251223.geojson`）
+        
+        **返回**: GeoJSON文件内容（Content-Type: application/geo+json）
+        
+        ## 数据库管理接口
+        
+        ### 8. GET /api/collections - 获取所有集合信息
+        **功能**: 获取ChromaDB中所有集合的基本信息
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "collections": {
+                "knowledge": {
+                    "name": "knowledge",
+                    "count": 10
+                },
+                "tasks": {...},
+                "executions": {...}
+            }
+        }
+        ```
+        
+        ### 9. GET /api/knowledge - 获取集合数据
+        **功能**: 获取指定集合中的所有记录
+        
+        **查询参数**: 
+        - `collection` (可选): 集合名称，可选值: `knowledge`、`tasks`、`executions`，默认: `knowledge`
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "collection": "knowledge",
+            "count": 10,
+            "items": [
+                {
+                    "id": "knowledge_0",
+                    "text": "文本内容",
+                    "metadata": {...}
+                }
+            ]
+        }
+        ```
+        
+        ### 10. POST /api/knowledge - 添加数据到集合
+        **功能**: 向指定集合添加新记录
+        
+        **请求体**:
+        ```json
+        {
+            "text": "文本内容",
+            "metadata": {
+                "unit": "单位名",
+                "type": "deployment_rule"
+            },
+            "collection": "knowledge"
+        }
+        ```
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "message": "数据已添加到knowledge集合",
+            "id": "knowledge_10"
+        }
+        ```
+        
+        ### 11. DELETE /api/knowledge/{id} - 删除记录
+        **功能**: 从指定集合中删除指定记录
+        
+        **路径参数**: `id` - 记录ID
+        
+        **查询参数**: 
+        - `collection` (可选): 集合名称，默认: `knowledge`
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "message": "记录 xxx 已从knowledge集合删除"
+        }
+        ```
+        
+        ### 12. PUT /api/knowledge/update - 批量更新knowledge集合
+        **功能**: 重新初始化knowledge集合，批量更新军事单位部署规则
+        
+        **返回**:
+        ```json
+        {
+            "success": true,
+            "message": "knowledge集合已更新",
+            "count": 10
+        }
+        ```
+        
+        ## 系统信息接口
+        
+        ### 13. GET / - 获取API服务信息
+        **功能**: 获取API服务的基本信息和所有可用端点列表
+        
+        ### 14. GET /health - 健康检查
+        **功能**: 检查API服务是否正常运行
+        
+        **返回**:
+        ```json
+        {
+            "status": "healthy"
+        }
+        ```
+        
+        ## API使用说明
+        
+        - **API地址**: http://localhost:8000
+        - **交互式API文档**: http://localhost:8000/docs (Swagger UI)
+        - **ReDoc文档**: http://localhost:8000/redoc
+        - **超时设置**: 建议前端设置超时时间大于180秒（LLM请求超时时间）
+        - **错误处理**: 所有接口在出错时返回HTTP状态码和错误详情
         """)
 
 if __name__ == "__main__":

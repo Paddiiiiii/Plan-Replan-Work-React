@@ -1,13 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import uvicorn
 import threading
 from pathlib import Path
 import sys
 import logging
+import os
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,14 +21,14 @@ if str(BASE_DIR) not in sys.path:
 try:
     from orchestrator import Orchestrator
     from context_manager import ContextManager
-    from config import CHROMA_CONFIG
+    from config import CHROMA_CONFIG, PATHS
 except ImportError:
     BASE_DIR_PARENT = BASE_DIR.parent
     if str(BASE_DIR_PARENT) not in sys.path:
         sys.path.insert(0, str(BASE_DIR_PARENT))
     from orchestrator import Orchestrator
     from context_manager import ContextManager
-    from config import CHROMA_CONFIG
+    from config import CHROMA_CONFIG, PATHS
 
 app = FastAPI(
     title="空地智能体API服务",
@@ -83,6 +85,8 @@ async def root():
             "/api/knowledge": "GET - 获取集合数据, POST - 添加数据",
             "/api/knowledge/{id}": "DELETE - 删除记录",
             "/api/knowledge/update": "PUT - 批量更新knowledge集合",
+            "/api/results": "GET - 获取所有结果文件列表",
+            "/api/results/{filename}": "GET - 获取特定结果文件内容",
             "/docs": "GET - API文档"
         }
     }
@@ -97,7 +101,16 @@ async def generate_plan(request: PlanRequest):
             message="计划生成完成"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成计划时出错: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"生成计划错误: {str(e)}")
+        logger.error(error_detail)
+        
+        error_msg = str(e)
+        if len(error_msg) > 500:
+            error_msg = error_msg[:500] + "..."
+        
+        raise HTTPException(status_code=500, detail=f"生成计划时出错: {error_msg}")
 
 @app.post("/api/replan", response_model=TaskResponse)
 async def replan_with_feedback(request: ReplanRequest):
@@ -293,6 +306,68 @@ async def update_knowledge_base():
     except Exception as e:
         logger.error(f"更新knowledge集合失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新knowledge集合失败: {str(e)}")
+
+@app.get("/api/results")
+async def get_results_list():
+    """获取所有结果文件列表"""
+    try:
+        result_dir = PATHS["result_dir"]
+        if not result_dir.exists():
+            return {
+                "success": True,
+                "results": [],
+                "count": 0
+            }
+        
+        result_files = list(result_dir.glob("*.geojson"))
+        result_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        results = []
+        for file_path in result_files:
+            stat = file_path.stat()
+            results.append({
+                "filename": file_path.name,
+                "size": stat.st_size,
+                "modified_time": stat.st_mtime,
+                "modified_time_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+            })
+        
+        return {
+            "success": True,
+            "results": results,
+            "count": len(results)
+        }
+    except Exception as e:
+        logger.error(f"获取结果文件列表失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取结果文件列表失败: {str(e)}")
+
+@app.get("/api/results/{filename}")
+async def get_result_file(filename: str):
+    """获取特定结果文件内容（GeoJSON）"""
+    try:
+        result_dir = PATHS["result_dir"]
+        file_path = result_dir / filename
+        
+        # 安全检查：确保文件在result目录内
+        if not file_path.resolve().is_relative_to(result_dir.resolve()):
+            raise HTTPException(status_code=403, detail="访问被拒绝")
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
+        
+        if not filename.endswith('.geojson'):
+            raise HTTPException(status_code=400, detail="只支持GeoJSON文件")
+        
+        return FileResponse(
+            path=str(file_path),
+            media_type="application/geo+json",
+            filename=filename
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取结果文件失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取结果文件失败: {str(e)}")
 
 def run_api_server(port: int = 8000):
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

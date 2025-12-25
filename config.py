@@ -7,7 +7,7 @@ LLM_CONFIG = {
     "api_endpoint": "http://192.168.1.200:11434/v1/chat/completions",
     "model": "qwen3:32b",
     "temperature": 0.7,
-    "max_tokens": 2000,
+    "max_tokens": 4096,
     "top_p": 1.0,
     "n": 1,
     "stream": False,
