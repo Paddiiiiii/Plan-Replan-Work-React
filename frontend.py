@@ -143,6 +143,12 @@ def main():
                     plan_json_str = json.dumps(plan, ensure_ascii=False, indent=2)
                     st.code(plan_json_str, language="json")
                 
+                # 显示完整的LLM思考过程
+                if plan.get('llm_response'):
+                    st.markdown("### LLM完整思考过程")
+                    with st.expander("查看完整思考过程", expanded=False):
+                        st.text(plan.get('llm_response'))
+                
                 st.markdown("### 计划摘要")
                 col1, col2 = st.columns(2)
                 with col1:

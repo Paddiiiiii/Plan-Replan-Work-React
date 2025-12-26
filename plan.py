@@ -61,6 +61,9 @@ class PlanModule:
         response = self._call_llm(messages)
         plan = self._parse_plan(response)
         
+        # 保存完整的LLM响应（包含思考过程）
+        plan["llm_response"] = response
+        
         # 将匹配的规则信息添加到plan中
         plan["matched_rules"] = []
         if rag_knowledge:
@@ -94,7 +97,52 @@ class PlanModule:
     def _parse_plan(self, response: str) -> Dict:
         import re
         
-        json_match = re.search(r'\{[\s\S]*\}', response)
+        # 尝试提取JSON部分（可能包含在代码块中）
+        # 先尝试匹配 ```json ... ``` 格式
+        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', response)
+        if json_block_match:
+            try:
+                plan = json.loads(json_block_match.group(1))
+                if "steps" not in plan:
+                    plan["steps"] = []
+                if "estimated_steps" not in plan:
+                    plan["estimated_steps"] = len(plan.get("steps", []))
+                
+                # 提取JSON之前的思考过程
+                thinking_part = response[:json_block_match.start()].strip()
+                
+                # 如果goal字段被截断、包含<redacted>标记，或者思考过程存在，则合并
+                goal_value = str(plan.get("goal", ""))
+                if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
+                    # 用完整的思考过程替换或补充goal
+                    if thinking_part:
+                        # 如果goal中有内容（即使被截断），保留它
+                        if goal_value and "<redacted" not in goal_value.lower():
+                            plan["goal"] = thinking_part + "\n\n" + goal_value
+                        else:
+                            plan["goal"] = thinking_part
+                    elif goal_value:
+                        plan["goal"] = goal_value
+                elif thinking_part and not goal_value:
+                    # 如果goal为空但有思考过程，使用思考过程
+                    plan["goal"] = thinking_part
+                
+                return plan
+            except Exception as e:
+                logger.warning(f"解析JSON代码块失败: {e}")
+                pass
+        
+        # 尝试匹配普通的JSON对象（贪婪匹配，匹配最后一个完整的JSON对象）
+        # 从后往前找，找到最后一个完整的JSON对象
+        json_match = None
+        for match in re.finditer(r'\{[\s\S]*\}', response):
+            try:
+                # 尝试解析，如果成功则保留
+                test_json = json.loads(match.group())
+                json_match = match
+            except:
+                continue
+        
         if json_match:
             try:
                 plan = json.loads(json_match.group())
@@ -102,10 +150,32 @@ class PlanModule:
                     plan["steps"] = []
                 if "estimated_steps" not in plan:
                     plan["estimated_steps"] = len(plan.get("steps", []))
+                
+                # 提取JSON之前的思考过程
+                thinking_part = response[:json_match.start()].strip()
+                
+                # 如果goal字段被截断、包含<redacted>标记，或者思考过程存在，则合并
+                goal_value = str(plan.get("goal", ""))
+                if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
+                    # 用完整的思考过程替换或补充goal
+                    if thinking_part:
+                        # 如果goal中有内容（即使被截断），保留它
+                        if goal_value and "<redacted" not in goal_value.lower():
+                            plan["goal"] = thinking_part + "\n\n" + goal_value
+                        else:
+                            plan["goal"] = thinking_part
+                    elif goal_value:
+                        plan["goal"] = goal_value
+                elif thinking_part and not goal_value:
+                    # 如果goal为空但有思考过程，使用思考过程
+                    plan["goal"] = thinking_part
+                
                 return plan
-            except:
+            except Exception as e:
+                logger.warning(f"解析JSON对象失败: {e}")
                 pass
         
+        # Fallback: 关键词匹配
         steps = []
         if "缓冲区" in response or "距离" in response:
             steps.append({"step_id": 1, "description": "根据建筑和道路距离筛选空地", "type": "buffer"})
@@ -118,7 +188,7 @@ class PlanModule:
         
         return {
             "task": "",
-            "goal": response[:200],
+            "goal": response,  # 返回完整响应，不再截断
             "steps": steps,
             "estimated_steps": len(steps)
         }
