@@ -139,28 +139,57 @@ def main():
             plan = st.session_state.current_plan
             if plan:
                 with st.expander("查看计划详情", expanded=True):
-                    # 使用st.code显示完整JSON，避免被截断
                     plan_json_str = json.dumps(plan, ensure_ascii=False, indent=2)
                     st.code(plan_json_str, language="json")
-                
-                # 显示完整的LLM思考过程
+
                 if plan.get('llm_response'):
                     st.markdown("### LLM完整思考过程")
                     with st.expander("查看完整思考过程", expanded=False):
-                        st.text(plan.get('llm_response'))
+                        # 提取thinking部分（JSON之前的内容）
+                        llm_response = plan.get('llm_response', '')
+                        thinking_part = llm_response
+                        
+                        # 尝试提取JSON代码块之前的内容
+                        import re
+                        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', llm_response)
+                        if json_block_match:
+                            thinking_part = llm_response[:json_block_match.start()].strip()
+                        else:
+                            # 如果没有找到JSON代码块，尝试找JSON对象
+                            json_match = None
+                            for match in re.finditer(r'\{[\s\S]*\}', llm_response):
+                                try:
+                                    json.loads(match.group())
+                                    json_match = match
+                                    break
+                                except:
+                                    continue
+                            if json_match:
+                                thinking_part = llm_response[:json_match.start()].strip()
+                        
+                        if thinking_part:
+                            st.text(thinking_part)
+                        else:
+                            st.text(llm_response)
                 
-                st.markdown("### 计划摘要")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**任务目标**: {plan.get('goal', 'N/A')}")
-                    st.write(f"**预计步骤数**: {plan.get('estimated_steps', len(plan.get('steps', [])))}")
-                with col2:
-                    steps = plan.get('steps', [])
-                    st.write(f"**步骤列表**:")
-                    for i, step in enumerate(steps, 1):
-                        st.write(f"{i}. {step.get('description', step.get('type', 'N/A'))}")
+                st.markdown("### 筛选步骤列表")
+                steps = plan.get('steps', [])
+                estimated_steps = plan.get('estimated_steps', len(steps))
+                st.write(f"**预计步骤数**: {estimated_steps}")
+                st.write(f"**步骤列表**:")
+                for i, step in enumerate(steps, 1):
+                    step_desc = step.get('description', step.get('type', 'N/A'))
+                    step_type = step.get('type', '')
+                    step_params = step.get('params', {})
+                    
+                    # 显示步骤信息
+                    if step_params:
+                        params_str = json.dumps(step_params, ensure_ascii=False)
+                        st.write(f"{i}. **{step_type}** - {step_desc}")
+                        st.write(f"   参数: `{params_str}`")
+                    else:
+                        st.write(f"{i}. **{step_type}** - {step_desc}")
                 
-                # 显示匹配的规则
                 if plan.get('matched_rules'):
                     st.markdown("### 匹配的部署规则")
                     for idx, rule in enumerate(plan.get('matched_rules', []), 1):
@@ -168,8 +197,7 @@ def main():
                             st.write(rule.get('text', ''))
                             if rule.get('metadata'):
                                 st.json(rule.get('metadata'))
-                
-                # 显示匹配的装备信息
+
                 if plan.get('matched_equipment'):
                     st.markdown("### 匹配的装备信息")
                     for idx, equipment in enumerate(plan.get('matched_equipment', []), 1):
@@ -287,34 +315,62 @@ def main():
                                         st.subheader("筛选参数")
                                         filter_params = {}
                                         
-                                        # 从执行结果中提取参数
+                                        # 从执行结果中提取参数（优先使用实际调用的参数）
                                         if work_result.get("results"):
                                             for step_result in work_result.get("results", []):
                                                 if step_result.get("success"):
                                                     tool_name = step_result.get("tool", "")
-                                                    result_data = step_result.get("result", {})
+                                                    step_params = step_result.get("params", {})  # 获取实际调用的参数
                                                     
                                                     if tool_name == "buffer_filter_tool":
-                                                        # 从结果路径中提取buffer_distance，或从执行记录中获取
-                                                        filter_params["缓冲区距离"] = "已应用"
+                                                        # 从实际调用的参数中获取buffer_distance
+                                                        buffer_dist = step_params.get("buffer_distance")
+                                                        if buffer_dist is not None:
+                                                            filter_params["缓冲区距离"] = f"{buffer_dist} 米"
                                                     elif tool_name == "elevation_filter_tool":
-                                                        # 尝试从结果中获取高程信息
-                                                        if 'elevation' in gdf.columns:
-                                                            min_elev = gdf['elevation'].min() if not gdf.empty else None
-                                                            max_elev = gdf['elevation'].max() if not gdf.empty else None
-                                                            if min_elev is not None and max_elev is not None:
-                                                                filter_params["高程范围"] = f"{min_elev:.0f} - {max_elev:.0f} 米"
+                                                        # 从实际调用的参数中获取高程范围
+                                                        min_elev = step_params.get("min_elev")
+                                                        max_elev = step_params.get("max_elev")
+                                                        if min_elev is not None or max_elev is not None:
+                                                            elev_str = ""
+                                                            if min_elev is not None:
+                                                                elev_str += f"{min_elev} 米"
+                                                            if max_elev is not None:
+                                                                if elev_str:
+                                                                    elev_str += " - "
+                                                                elev_str += f"{max_elev} 米"
+                                                            filter_params["高程范围"] = elev_str
                                                     elif tool_name == "slope_filter_tool":
-                                                        if 'slope_deg' in gdf.columns:
-                                                            min_slope = gdf['slope_deg'].min() if not gdf.empty else None
-                                                            max_slope = gdf['slope_deg'].max() if not gdf.empty else None
-                                                            if min_slope is not None and max_slope is not None:
-                                                                filter_params["坡度范围"] = f"{min_slope:.1f}° - {max_slope:.1f}°"
+                                                        min_slope = step_params.get("min_slope")
+                                                        max_slope = step_params.get("max_slope")
+                                                        if min_slope is not None or max_slope is not None:
+                                                            slope_str = ""
+                                                            if min_slope is not None:
+                                                                slope_str += f"{min_slope}°"
+                                                            if max_slope is not None:
+                                                                if slope_str:
+                                                                    slope_str += " - "
+                                                                slope_str += f"{max_slope}°"
+                                                            filter_params["坡度范围"] = slope_str
                                                     elif tool_name == "vegetation_filter_tool":
-                                                        if 'vegetation_type' in gdf.columns:
-                                                            veg_types = gdf['vegetation_type'].unique() if not gdf.empty else []
-                                                            if len(veg_types) > 0:
-                                                                filter_params["植被类型"] = ", ".join([str(v) for v in veg_types[:5]])  # 最多显示5种
+                                                        veg_types = step_params.get("vegetation_types", [])
+                                                        exclude_types = step_params.get("exclude_types", [])
+                                                        if veg_types:
+                                                            veg_names = {
+                                                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                            }
+                                                            veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                            filter_params["植被类型"] = ", ".join(veg_list)
+                                                        elif exclude_types:
+                                                            veg_names = {
+                                                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                            }
+                                                            exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                            filter_params["排除植被类型"] = ", ".join(exclude_list)
                                         
                                         # 从plan中提取参数（更准确）
                                         if plan.get("steps"):
@@ -535,6 +591,54 @@ def main():
             st.session_state.db_data = None
         if "db_refresh_key" not in st.session_state:
             st.session_state.db_refresh_key = 0
+        
+        # 清空集合功能
+        st.subheader("清空集合")
+        st.warning("⚠️ 清空操作不可恢复，请谨慎操作！")
+        clear_col1, clear_col2 = st.columns(2)
+        with clear_col1:
+            if st.button("🗑️ 清空 executions 集合", key="clear_executions", type="secondary"):
+                try:
+                    response = requests.delete(
+                        f"{API_URL}/api/knowledge/clear/executions",
+                        timeout=API_TIMEOUT
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("success"):
+                            st.success(f"✓ {result.get('message', 'executions集合已清空')}")
+                            st.session_state.db_data = None
+                            st.session_state.tab3_should_load = True
+                            st.rerun()
+                        else:
+                            st.error(f"清空失败: {result.get('message', '未知错误')}")
+                    else:
+                        st.error(f"API请求失败: {response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"连接API失败: {e}")
+        
+        with clear_col2:
+            if st.button("🗑️ 清空 tasks 集合", key="clear_tasks", type="secondary"):
+                try:
+                    response = requests.delete(
+                        f"{API_URL}/api/knowledge/clear/tasks",
+                        timeout=API_TIMEOUT
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("success"):
+                            st.success(f"✓ {result.get('message', 'tasks集合已清空')}")
+                            st.session_state.db_data = None
+                            st.session_state.tab3_should_load = True
+                            st.rerun()
+                        else:
+                            st.error(f"清空失败: {result.get('message', '未知错误')}")
+                    else:
+                        st.error(f"API请求失败: {response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"连接API失败: {e}")
+        
+        st.markdown("---")
         if "tab3_should_load" not in st.session_state:
             st.session_state.tab3_should_load = False
         

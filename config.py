@@ -34,6 +34,6 @@ CHROMA_CONFIG = {
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 RAG_CONFIG = {
-    "top_k": 5,
+    "top_k": 3,
     "similarity_threshold": 0.7
 }

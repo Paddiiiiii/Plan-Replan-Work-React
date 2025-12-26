@@ -162,7 +162,16 @@ async def execute_plan(request: ExecuteRequest):
             message="执行完成" if result.get("success") else "执行失败"
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"执行计划时出错: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        logger.error(f"执行计划错误: {str(e)}")
+        logger.error(error_detail)
+        
+        error_msg = str(e)
+        if len(error_msg) > 500:
+            error_msg = error_msg[:500] + "..."
+        
+        raise HTTPException(status_code=500, detail=f"执行计划时出错: {error_msg}")
 
 @app.post("/api/task", response_model=TaskResponse)
 async def submit_task(request: TaskRequest):
@@ -311,6 +320,42 @@ async def save_task(request: SaveTaskRequest):
     except Exception as e:
         logger.error(f"保存任务失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"保存任务失败: {str(e)}")
+
+@app.delete("/api/knowledge/clear/{collection}")
+async def clear_collection(collection: str):
+    """清空指定集合的所有记录"""
+    try:
+        # 只允许清空executions和tasks集合
+        allowed_collections = ["executions", "tasks"]
+        if collection not in allowed_collections:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"不允许清空{collection}集合。只允许清空: {', '.join(allowed_collections)}"
+            )
+        
+        coll = context_manager.chroma_client.get_collection(collection)
+        data = coll.get()
+        
+        if data["ids"]:
+            coll.delete(ids=data["ids"])
+            count = len(data["ids"])
+            logger.info(f"成功清空{collection}集合，共删除{count}条记录")
+            return {
+                "success": True,
+                "message": f"{collection}集合已清空，共删除{count}条记录",
+                "count": count
+            }
+        else:
+            return {
+                "success": True,
+                "message": f"{collection}集合已经是空的",
+                "count": 0
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清空{collection}集合失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"清空集合失败: {str(e)}")
 
 @app.put("/api/knowledge/update")
 async def update_knowledge_base():

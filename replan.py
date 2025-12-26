@@ -22,7 +22,13 @@ class ReplanModule:
         
         tools_info = [{"name": tool} for tool in available_tools]
         tools_info_str = json.dumps(tools_info, ensure_ascii=False, indent=2)
-        prompt = prompt_template.format(tools_info=tools_info_str)
+        
+        # 使用replace而不是format，避免JSON示例中的字段被误认为是占位符
+        try:
+            prompt = prompt_template.replace("{tools_info}", tools_info_str)
+        except (KeyError, ValueError) as e:
+            logger.warning(f"提示词格式化失败，使用替换方式: {e}")
+            prompt = prompt_template.replace("{tools_info}", tools_info_str)
         
         # 检索装备信息（含射程），用于重新规划时考虑射程因素
         plan_text = json.dumps(original_plan, ensure_ascii=False)

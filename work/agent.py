@@ -39,16 +39,29 @@ class WorkAgent:
                     step["params"] = {}
                 step["params"]["input_geojson_path"] = last_result_path
             
-            step_result = self._execute_step(step)
-            results.append(step_result)
-            
-            if step_result.get("success") and step_result.get("result", {}).get("result_path"):
-                last_result_path = step_result["result"]["result_path"]
-            
-            if not step_result.get("success", False):
+            try:
+                step_result = self._execute_step(step)
+                results.append(step_result)
+                
+                if step_result.get("success") and step_result.get("result", {}).get("result_path"):
+                    last_result_path = step_result["result"]["result_path"]
+                
+                if not step_result.get("success", False):
+                    return {
+                        "success": False,
+                        "error": step_result.get("error"),
+                        "completed_steps": results
+                    }
+            except Exception as e:
+                import traceback
+                error_detail = traceback.format_exc()
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"执行步骤 {i+1} 时出错: {str(e)}")
+                logger.error(error_detail)
                 return {
                     "success": False,
-                    "error": step_result.get("error"),
+                    "error": f"执行步骤 {i+1} 时出错: {str(e)}",
                     "completed_steps": results
                 }
         
@@ -62,14 +75,9 @@ class WorkAgent:
     def _execute_step(self, step: Dict) -> Dict[str, Any]:
         step_type = step.get("type", "")
         step_description = step.get("description", "")
+        step_params = step.get("params", {})
         
-        if step.get("tool"):
-            return self._act({
-                "tool": step["tool"],
-                "params": step.get("params", {})
-            })
-        
-        # Type到工具的映射（作为fallback机制）
+        # Type到工具的映射
         type_to_tool = {
             "buffer": "buffer_filter_tool",
             "elevation": "elevation_filter_tool",
@@ -77,9 +85,23 @@ class WorkAgent:
             "vegetation": "vegetation_filter_tool"
         }
         
-        # 如果步骤有明确的type，且LLM可能无法识别，先尝试直接映射
-        # 但优先让LLM通过_think来选择，以获得更好的参数推断
+        # 如果步骤已经指定了tool，直接使用
+        if step.get("tool"):
+            return self._act({
+                "tool": step["tool"],
+                "params": step_params
+            })
         
+        # 如果步骤有type和params，直接使用，不需要LLM推断
+        if step_type and step_type in type_to_tool and step_params:
+            tool_name = type_to_tool[step_type]
+            return self._act({
+                "tool": tool_name,
+                "params": step_params
+            })
+        
+        # 如果步骤有type但没有params，或者需要LLM帮助选择工具，才调用_think
+        # 但优先使用计划中的params（如果有的话）
         rag_context = self.context_manager.load_dynamic_context(
             step_description,
             collection="executions"
@@ -95,15 +117,20 @@ class WorkAgent:
         thought = self._think(step, rag_context, rag_equipment)
         action = self._extract_action(thought)
         
+        # 如果LLM返回了action，优先使用计划中的params（如果存在）
+        if action and step_params:
+            # 合并参数：LLM返回的params作为基础，但计划中的params优先
+            merged_params = action.get("params", {})
+            merged_params.update(step_params)  # 计划中的params覆盖LLM推断的params
+            action["params"] = merged_params
+        
         # 如果extract_action返回None，且步骤有明确的type，使用type映射作为fallback
         if action is None and step_type in type_to_tool:
-            # 根据type创建默认action
             tool_name = type_to_tool[step_type]
             action = {
                 "tool": tool_name,
-                "params": step.get("params", {})
+                "params": step_params if step_params else {}
             }
-            # 对于需要input_geojson_path的工具，如果未提供且上一步有结果，会自动填充（在execute_plan中处理）
         
         # 如果仍然无法确定，返回错误
         if action is None:
@@ -149,6 +176,7 @@ class WorkAgent:
             rag_text += f"\n上一步的输出文件路径: {previous_result}"
         
         # 在用户消息中明确提示type字段的含义
+        step_type = step.get("type", "")  # 从step中获取type
         user_content = f"步骤: {json.dumps(step, ensure_ascii=False)}{rag_text}"
         if step_type:
             type_hint = f"\n\n注意：步骤类型(type)为'{step_type}'，对应工具映射：buffer->buffer_filter_tool, elevation->elevation_filter_tool, slope->slope_filter_tool, vegetation->vegetation_filter_tool"
@@ -217,6 +245,7 @@ class WorkAgent:
             return {
                 "success": is_success,
                 "tool": tool_name,
+                "params": params,  # 添加实际调用的参数
                 "result": result,
                 "error": result.get("error") if not is_success else None
             }

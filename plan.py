@@ -1,6 +1,7 @@
 from typing import Dict
 from context_manager import ContextManager
 from config import LLM_CONFIG
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 import requests
 import json
 import logging
@@ -20,6 +21,13 @@ def save_task_to_rag(context_manager: ContextManager, user_task: str, plan: Dict
 class PlanModule:
     def __init__(self, context_manager: ContextManager):
         self.context_manager = context_manager
+        # 初始化工具实例以获取schema信息
+        self.tools = {
+            "buffer_filter_tool": BufferFilterTool(),
+            "elevation_filter_tool": ElevationFilterTool(),
+            "slope_filter_tool": SlopeFilterTool(),
+            "vegetation_filter_tool": VegetationFilterTool()
+        }
     
     def generate_plan(self, user_task: str) -> Dict:
         rag_tasks = self.context_manager.load_dynamic_context(
@@ -41,6 +49,15 @@ class PlanModule:
         
         prompt = self.context_manager.load_static_context("plan_prompt")
         
+        # 添加工具schema信息，确保plan部分了解工具的具体参数结构
+        tools_schema = []
+        for tool_name, tool in self.tools.items():
+            schema = tool.get_schema()
+            tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
+        
+        tools_schema_text = "\n\n".join(tools_schema)
+        prompt_with_schema = f"{prompt}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
+        
         knowledge_text = ""
         if rag_knowledge:
             knowledge_text = "\n相关部署规则:\n" + "\n".join([ctx.get("text", "") for ctx in rag_knowledge])
@@ -54,17 +71,21 @@ class PlanModule:
             tasks_text = "\n相关历史任务:\n" + json.dumps(rag_tasks, ensure_ascii=False)
         
         messages = [
-            {"role": "system", "content": prompt},
+            {"role": "system", "content": prompt_with_schema},
             {"role": "user", "content": f"任务: {user_task}{knowledge_text}{equipment_text}{tasks_text}"}
         ]
         
         response = self._call_llm(messages)
+        logger.info(f"Plan阶段 - LLM响应长度: {len(response)}")
+        logger.info(f"Plan阶段 - LLM响应前500字符: {response[:500]}")
+        
         plan = self._parse_plan(response)
         
-        # 保存完整的LLM响应（包含思考过程）
+        logger.info(f"Plan阶段 - 解析后的步骤数: {len(plan.get('steps', []))}")
+        logger.info(f"Plan阶段 - 步骤类型: {[s.get('type', 'N/A') for s in plan.get('steps', [])]}")
         plan["llm_response"] = response
         
-        # 将匹配的规则信息添加到plan中
+
         plan["matched_rules"] = []
         if rag_knowledge:
             for ctx in rag_knowledge:
@@ -96,9 +117,7 @@ class PlanModule:
     
     def _parse_plan(self, response: str) -> Dict:
         import re
-        
-        # 尝试提取JSON部分（可能包含在代码块中）
-        # 先尝试匹配 ```json ... ``` 格式
+
         json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', response)
         if json_block_match:
             try:
@@ -107,16 +126,12 @@ class PlanModule:
                     plan["steps"] = []
                 if "estimated_steps" not in plan:
                     plan["estimated_steps"] = len(plan.get("steps", []))
-                
-                # 提取JSON之前的思考过程
+
                 thinking_part = response[:json_block_match.start()].strip()
-                
-                # 如果goal字段被截断、包含<redacted>标记，或者思考过程存在，则合并
+
                 goal_value = str(plan.get("goal", ""))
                 if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
-                    # 用完整的思考过程替换或补充goal
                     if thinking_part:
-                        # 如果goal中有内容（即使被截断），保留它
                         if goal_value and "<redacted" not in goal_value.lower():
                             plan["goal"] = thinking_part + "\n\n" + goal_value
                         else:
@@ -124,20 +139,16 @@ class PlanModule:
                     elif goal_value:
                         plan["goal"] = goal_value
                 elif thinking_part and not goal_value:
-                    # 如果goal为空但有思考过程，使用思考过程
                     plan["goal"] = thinking_part
                 
                 return plan
             except Exception as e:
                 logger.warning(f"解析JSON代码块失败: {e}")
                 pass
-        
-        # 尝试匹配普通的JSON对象（贪婪匹配，匹配最后一个完整的JSON对象）
-        # 从后往前找，找到最后一个完整的JSON对象
+
         json_match = None
         for match in re.finditer(r'\{[\s\S]*\}', response):
             try:
-                # 尝试解析，如果成功则保留
                 test_json = json.loads(match.group())
                 json_match = match
             except:
@@ -150,16 +161,12 @@ class PlanModule:
                     plan["steps"] = []
                 if "estimated_steps" not in plan:
                     plan["estimated_steps"] = len(plan.get("steps", []))
-                
-                # 提取JSON之前的思考过程
+
                 thinking_part = response[:json_match.start()].strip()
                 
-                # 如果goal字段被截断、包含<redacted>标记，或者思考过程存在，则合并
                 goal_value = str(plan.get("goal", ""))
                 if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
-                    # 用完整的思考过程替换或补充goal
                     if thinking_part:
-                        # 如果goal中有内容（即使被截断），保留它
                         if goal_value and "<redacted" not in goal_value.lower():
                             plan["goal"] = thinking_part + "\n\n" + goal_value
                         else:
@@ -167,7 +174,6 @@ class PlanModule:
                     elif goal_value:
                         plan["goal"] = goal_value
                 elif thinking_part and not goal_value:
-                    # 如果goal为空但有思考过程，使用思考过程
                     plan["goal"] = thinking_part
                 
                 return plan
@@ -175,16 +181,15 @@ class PlanModule:
                 logger.warning(f"解析JSON对象失败: {e}")
                 pass
         
-        # Fallback: 关键词匹配
         steps = []
         if "缓冲区" in response or "距离" in response:
-            steps.append({"step_id": 1, "description": "根据建筑和道路距离筛选空地", "type": "buffer"})
+            steps.append({"step_id": 1, "description": "根据建筑和道路距离筛选空地", "type": "buffer", "params": {}})
         if "高程" in response or "海拔" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据高程范围筛选", "type": "elevation"})
+            steps.append({"step_id": len(steps) + 1, "description": "根据高程范围筛选", "type": "elevation", "params": {}})
         if "坡度" in response or "倾斜" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据坡度范围筛选", "type": "slope"})
-        if "植被" in response or "草地" in response or "林地" in response or "树木" in response or "耕地" in response or "裸地" in response or "水体" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据植被类型筛选", "type": "vegetation"})
+            steps.append({"step_id": len(steps) + 1, "description": "根据坡度范围筛选", "type": "slope", "params": {}})
+        if "植被" in response or "草地" in response or "林地" in response or "树木" in response or "耕地" in response or "裸地" in response or "水体" in response or "湿地" in response or "苔原" in response or "植被" in response or "稀疏植被" in response or "永久性水体" in response or "雪和冰" in response:
+            steps.append({"step_id": len(steps) + 1, "description": "根据植被类型筛选", "type": "vegetation", "params": {}})
         
         return {
             "task": "",
