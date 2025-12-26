@@ -1,6 +1,7 @@
 from typing import Dict, List
 from context_manager import ContextManager
 from config import LLM_CONFIG
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 import requests
 import json
 import logging
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 class ReplanModule:
     def __init__(self, context_manager: ContextManager):
         self.context_manager = context_manager
+        # 初始化工具实例以获取schema信息
+        self.tools = {
+            "buffer_filter_tool": BufferFilterTool(),
+            "elevation_filter_tool": ElevationFilterTool(),
+            "slope_filter_tool": SlopeFilterTool(),
+            "vegetation_filter_tool": VegetationFilterTool()
+        }
     
     def should_replan(self, work_result: Dict) -> bool:
         if not work_result.get("success", False):
@@ -20,15 +28,14 @@ class ReplanModule:
     def replan(self, original_plan: Dict, work_result: Dict, available_tools: List[str]) -> Dict:
         prompt_template = self.context_manager.load_static_context("replan_prompt")
         
-        tools_info = [{"name": tool} for tool in available_tools]
-        tools_info_str = json.dumps(tools_info, ensure_ascii=False, indent=2)
+        # 添加工具schema信息，确保replan部分了解工具的具体参数结构
+        tools_schema = []
+        for tool_name, tool in self.tools.items():
+            schema = tool.get_schema()
+            tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
         
-        # 使用replace而不是format，避免JSON示例中的字段被误认为是占位符
-        try:
-            prompt = prompt_template.replace("{tools_info}", tools_info_str)
-        except (KeyError, ValueError) as e:
-            logger.warning(f"提示词格式化失败，使用替换方式: {e}")
-            prompt = prompt_template.replace("{tools_info}", tools_info_str)
+        tools_schema_text = "\n\n".join(tools_schema)
+        prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
         
         # 检索装备信息（含射程），用于重新规划时考虑射程因素
         plan_text = json.dumps(original_plan, ensure_ascii=False)
@@ -48,7 +55,7 @@ class ReplanModule:
         user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}{equipment_text}"
         
         messages = [
-            {"role": "system", "content": prompt},
+            {"role": "system", "content": prompt_with_schema},
             {"role": "user", "content": user_content}
         ]
         
@@ -63,33 +70,14 @@ class ReplanModule:
             
             prompt_template = self.context_manager.load_static_context("replan_prompt")
             
-            if not prompt_template:
-                prompt_template = """你是一个重新规划助手，根据用户反馈调整计划。
-
-可用工具：
-{tools_info}
-
-输出格式（JSON）：
-{{
-    "task": "用户原始任务",
-    "goal": "调整后的任务目标",
-    "steps": [
-        {{"step_id": 1, "tool": "buffer_filter_tool", "params": {{"buffer_distance": 500}}}},
-        {{"step_id": 2, "tool": "vegetation_filter_tool", "params": {{"input_geojson_path": "...", "vegetation_types": [30]}}}},
-        ...
-    ],
-    "required_tools": ["buffer_filter_tool", "vegetation_filter_tool"],
-    "reason": "重新规划的原因"
-}}"""
+            # 添加工具schema信息，确保replan部分了解工具的具体参数结构
+            tools_schema = []
+            for tool_name, tool in self.tools.items():
+                schema = tool.get_schema()
+                tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
             
-            tools_info = [{"name": tool} for tool in available_tools]
-            tools_info_str = json.dumps(tools_info, ensure_ascii=False, indent=2)
-            
-            try:
-                prompt = prompt_template.format(tools_info=tools_info_str)
-            except (KeyError, ValueError) as e:
-                logger.warning(f"提示词格式化失败，使用替换方式: {e}")
-                prompt = prompt_template.replace("{tools_info}", tools_info_str)
+            tools_schema_text = "\n\n".join(tools_schema)
+            prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
             
             # 检索装备信息（含射程），用于重新规划时考虑射程因素
             plan_text = json.dumps(original_plan, ensure_ascii=False)
@@ -108,7 +96,7 @@ class ReplanModule:
             user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}{equipment_text}"
             
             messages = [
-                {"role": "system", "content": prompt},
+                {"role": "system", "content": prompt_with_schema},
                 {"role": "user", "content": user_content}
             ]
             
@@ -153,21 +141,45 @@ class ReplanModule:
     
     def _parse_plan(self, response: str) -> Dict:
         import re
+
+        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', response)
+        if json_block_match:
+            try:
+                plan = json.loads(json_block_match.group(1))
+                if "steps" not in plan:
+                    plan["steps"] = []
+                if "estimated_steps" not in plan:
+                    plan["estimated_steps"] = len(plan.get("steps", []))
+                return plan
+            except Exception as e:
+                logger.warning(f"解析JSON代码块失败: {e}")
+                pass
+
+        json_match = None
+        for match in re.finditer(r'\{[\s\S]*\}', response):
+            try:
+                test_json = json.loads(match.group())
+                json_match = match
+                break
+            except:
+                continue
         
-        json_match = re.search(r'\{[\s\S]*\}', response)
         if json_match:
             try:
                 plan = json.loads(json_match.group())
                 if "steps" not in plan:
                     plan["steps"] = []
+                if "estimated_steps" not in plan:
+                    plan["estimated_steps"] = len(plan.get("steps", []))
                 return plan
-            except:
+            except Exception as e:
+                logger.warning(f"解析JSON对象失败: {e}")
                 pass
         
         return {
             "task": "",
-            "goal": response[:200],
+            "goal": response[:200] if response else "",
             "steps": [],
-            "required_tools": [],
+            "estimated_steps": 0,
             "reason": "解析失败"
         }
