@@ -9,7 +9,13 @@
 - 基于RAG检索历史任务和领域知识，生成合理的执行计划
 - 支持多步骤复杂任务的自动分解和排序
 
-### 2. **RAG增强的智能决策**
+### 2. **RAG增强的智能决策（混合检索系统）**
+- **智能路由**：根据查询内容自动路由到合适的collection（knowledge/equipment/executions）
+- **混合检索**：向量语义检索 + 关键词匹配，提升专有名词和参数值的匹配准确度
+- **距离阈值过滤**：使用cosine距离阈值（max_distance=0.35，相当于相似度≥0.65）确保检索质量
+- **元数据加权**：unit/type/tool匹配时自动加分，强化规则约束
+- **多库并查**：支持同时从多个collection检索并融合排序
+- **动态top_k**：自适应召回策略，过滤后不足时自动放宽阈值
 - **知识库检索**：从knowledge集合检索军事单位部署规则
 - **历史经验学习**：从tasks集合检索相似历史任务和计划
 - **执行记录参考**：从executions集合检索历史执行记录，避免重复错误
@@ -158,11 +164,19 @@
 #### 5. **ContextManager（上下文管理器）**
 智能体的"记忆"系统：
 - **静态上下文**：管理提示词模板（plan_prompt, replan_prompt, work_prompt, system_prompt）
-- **动态上下文**：ChromaDB向量数据库，支持语义检索
+- **动态上下文**：ChromaDB向量数据库，支持混合检索（向量+关键词）
   - `tasks`集合：历史任务和计划
-  - `executions`集合：执行记录和结果
+  - `executions`集合：执行记录和结果（最多保留30条，按时间自动清理）
   - `knowledge`集合：领域知识（15种军事单位部署规则）
-  - `equipment`集合：装备信息
+  - `equipment`集合：装备信息（含射程等）
+- **RAG检索优化**：
+  - **Embedding模型**：BAAI/bge-large-zh-v1.5（中文优化）
+  - **距离度量**：统一使用cosine距离，确保阈值可解释
+  - **BGE前缀优化**：query添加"query: "前缀，passage添加"passage: "前缀
+  - **智能路由**：根据关键词自动选择collection（如"射程"→equipment，"部署"→knowledge）
+  - **混合打分**：语义相似度(75%) + 关键词匹配(25%) + 元数据加分
+  - **质量过滤**：距离阈值过滤 + 动态top_k调整
+  - **详细日志**：记录路由、召回、过滤、打分全过程，便于调参
 - **上下文压缩**：自动处理过长上下文
 
 ### 工具系统
@@ -311,6 +325,37 @@ AIgen/
 
 ## 🔄 关键设计改进
 
+### RAG检索系统优化
+
+**统一相似度口径**：
+- 所有collection统一使用cosine距离度量
+- 距离阈值 `max_distance=0.35` 相当于相似度≥0.65
+- 确保阈值可解释、可调、稳定
+
+**混合检索策略**：
+- **向量语义检索**：使用BGE-large-zh-v1.5模型，query和passage分别添加前缀优化
+- **关键词匹配**：提取中文词块、数字、工具名、单位名，计算匹配分数
+- **融合打分**：`final_score = 0.75 * semantic_score + 0.25 * keyword_score + metadata_boost`
+- **元数据加权**：unit/type/tool匹配时自动加分，强化规则约束
+
+**智能路由机制**：
+- 根据查询关键词自动路由到合适的collection
+- 支持多库并查（如同时查询knowledge和equipment）
+- 路由规则：
+  - "射程"/"最大射程" → equipment
+  - "部署"/"配置"/单位名 → knowledge
+  - "工具"/"筛选" → executions
+
+**质量保证机制**：
+- **距离阈值过滤**：只保留 `distance <= max_distance` 的结果
+- **动态top_k**：先召回 `top_k * oversample` 条，过滤后不足 `min_k` 时放宽阈值
+- **低置信度标记**：放宽阈值的结果标记为 `low_confidence=True`
+
+**详细日志记录**：
+- 记录路由信息、关键词提取、召回数量、过滤前后数量
+- 记录每个候选的distance、semantic_score、keyword_score、metadata_boost、final_score
+- 便于调参和问题诊断
+
 ### 职能分离优化
 
 **Plan阶段（规划）**：
@@ -346,10 +391,14 @@ AIgen/
 **1. Plan阶段（规划）**
 ```
 智能体行为：
-├─ RAG检索knowledge集合 → 找到轻步兵部署规则
+├─ RAG智能路由 → 根据查询内容路由到knowledge/equipment集合
+├─ 混合检索knowledge集合 → 向量+关键词匹配，找到轻步兵部署规则
+│  ├─ 向量检索：语义相似度匹配
+│  ├─ 关键词匹配：识别"轻步兵"、"部署"等关键词
+│  ├─ 元数据加权：unit="轻步兵"匹配加分
 │  └─ 规则：距离居民区100-300米，中等高程，缓坡
-├─ RAG检索tasks集合 → 找到相似历史任务
-├─ RAG检索equipment集合 → 找到相关装备信息
+├─ 混合检索equipment集合 → 找到相关装备信息（含射程）
+├─ 距离阈值过滤 → 只保留相似度≥0.65的结果
 ├─ 动态获取工具schema → 了解每个工具的参数结构
 └─ 生成计划（包含具体参数）：
    {
@@ -448,8 +497,17 @@ LLM_CONFIG = {
 
 - 数据库路径: `AIgen/context/dynamic/chroma_db/`
 - 集合: `tasks`, `executions`, `knowledge`, `equipment`
-- 嵌入模型: `sentence-transformers/all-MiniLM-L6-v2`
-- RAG配置: `top_k=5`, `similarity_threshold=0.7`
+- **嵌入模型**: `BAAI/bge-large-zh-v1.5`（中文优化的大模型）
+- **距离度量**: cosine（统一配置，确保阈值可解释）
+- **RAG配置**:
+  - `top_k=2`: 最终返回的结果数
+  - `oversample=2`: 向量召回时先召回 `top_k * oversample` 条候选
+  - `min_k=2`: 过滤后最少保留的结果数
+  - `max_distance=0.35`: cosine距离阈值（相当于相似度≥0.65）
+  - `w_sem=0.75`: 语义相似度权重
+  - `w_kw=0.25`: 关键词匹配权重
+  - `metadata_boost_unit=0.15`: unit匹配时的加分
+  - `metadata_boost_type=0.10`: type匹配时的加分
 
 ## 📚 知识库管理
 
@@ -482,8 +540,17 @@ curl -X PUT "http://localhost:8000/api/knowledge/update"
 
 **方法3**: 脚本
 ```bash
+# 更新knowledge集合（军事单位部署规则）
 python update_knowledge.py
+
+# 更新equipment集合（装备信息）
+python update_equipment.py
 ```
+
+**注意**：
+- 更新知识库后，所有文档会使用新的embedding模型重新编码
+- 文档入库时自动添加"passage: "前缀（BGE优化）
+- ID生成策略：`{collection}_{timestamp_ms}_{uuid8}`，避免并发冲突
 
 ## 🔧 开发指南
 
@@ -506,16 +573,27 @@ python update_knowledge.py
 
 ### 扩展知识库
 
-1. 使用前端界面添加数据
-2. 或使用API接口批量导入
-3. 或修改 `context_manager.py` 中的 `update_knowledge_base()` 方法
+1. **使用前端界面添加数据**：在"数据库管理"标签页手动添加
+2. **使用API接口批量导入**：`POST /api/knowledge`
+3. **修改代码**：
+   - 修改 `context_manager.py` 中的 `_get_military_units_rules()` 方法（knowledge集合）
+   - 修改 `context_manager.py` 中的 `_get_equipment_info()` 方法（equipment集合）
+   - 运行 `update_knowledge.py` 或 `update_equipment.py` 更新数据库
+
+**RAG检索调参**：
+- 修改 `config.py` 中的 `RAG_CONFIG` 参数
+- `max_distance`: 距离阈值（越小越严格，建议0.30-0.40）
+- `w_sem`/`w_kw`: 语义和关键词权重（总和建议为1.0）
+- `metadata_boost_*`: 元数据加分权重
+- 查看日志了解检索效果，根据实际情况调整参数
 
 ## 🛠️ 技术栈
 
 - **后端框架**: FastAPI
 - **前端框架**: Streamlit
-- **向量数据库**: ChromaDB
-- **嵌入模型**: sentence-transformers/all-MiniLM-L6-v2
+- **向量数据库**: ChromaDB（使用cosine距离度量）
+- **嵌入模型**: BAAI/bge-large-zh-v1.5（中文优化的BGE大模型）
+- **RAG检索**: 混合检索（向量语义 + 关键词匹配 + 元数据加权）
 - **地理空间处理**: geopandas, shapely, rasterio
 - **LLM**: 本地模型（Ollama兼容API）
 - **地图可视化**: Folium

@@ -1,11 +1,18 @@
 import json
 import os
+import time
+import logging
+import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from config import PATHS, CHROMA_CONFIG, EMBEDDING_MODEL, RAG_CONFIG
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 class ContextManager:
@@ -14,6 +21,56 @@ class ContextManager:
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
         self._init_chroma()
         self._load_static_context()
+    
+    def _embed_query(self, query: str) -> List[float]:
+        """对查询文本进行embedding，添加query前缀（BGE模型优化）"""
+        prefixed_query = f"query: {query}"
+        return self.embedding_model.encode(prefixed_query).tolist()
+    
+    def _embed_passage(self, text: str) -> List[float]:
+        """对文档文本进行embedding，添加passage前缀（BGE模型优化）"""
+        prefixed_text = f"passage: {text}"
+        return self.embedding_model.encode(prefixed_text).tolist()
+    
+    def _route_collection(self, query: str) -> List[str]:
+        """根据查询内容路由到相应的collection(s)，支持多库并查"""
+        query_lower = query.lower()
+        collections = []
+        
+        # 装备信息相关关键词 → equipment
+        equipment_keywords = ["射程", "最大射程", "range", "max_range", "有效射程"]
+        if any(kw in query for kw in equipment_keywords):
+            collections.append(CHROMA_CONFIG["collection_equipment"])
+        
+        # 工具/执行相关关键词 → executions
+        execution_keywords = [
+            "用什么工具", "怎么筛选", "buffer_filter_tool", "elevation_filter_tool",
+            "vegetation_filter_tool", "slope_filter_tool", "链式", "工具链"
+        ]
+        if any(kw in query for kw in execution_keywords):
+            collections.append(CHROMA_CONFIG["collection_executions"])
+        
+        # 部署规则/知识相关关键词 → knowledge
+        knowledge_keywords = [
+            "部署", "配置", "坡度", "高程", "缓冲距离", "地表", "隐蔽", "机动"
+        ]
+        # 检查是否提到单位名
+        unit_names = [
+            "轻步兵", "重装步兵", "机械化步兵", "坦克部队", "反坦克步兵",
+            "自行火炮", "牵引火炮", "防空部队", "狙击手", "特种部队",
+            "装甲侦察单位", "工兵部队", "后勤保障部队", "指挥单位", "无人机侦察控制单元"
+        ]
+        has_unit = any(unit in query for unit in unit_names)
+        
+        if any(kw in query for kw in knowledge_keywords) or has_unit:
+            collections.append(CHROMA_CONFIG["collection_knowledge"])
+        
+        # 如果没有任何匹配，默认返回knowledge（通常比executions更像规则/知识）
+        if not collections:
+            collections.append(CHROMA_CONFIG["collection_knowledge"])
+        
+        # 去重并返回
+        return list(set(collections))
     
     def _init_chroma(self):
         os.makedirs(PATHS["chroma_db_dir"], exist_ok=True)
@@ -24,6 +81,7 @@ class ContextManager:
         self._ensure_collections()
     
     def _ensure_collections(self):
+        """确保所有collection存在，创建时显式指定cosine距离度量"""
         for collection_name in [CHROMA_CONFIG["collection_tasks"], 
                                 CHROMA_CONFIG["collection_executions"],
                                 CHROMA_CONFIG["collection_knowledge"],
@@ -31,7 +89,11 @@ class ContextManager:
             try:
                 self.chroma_client.get_collection(collection_name)
             except:
-                self.chroma_client.create_collection(collection_name)
+                # 显式指定cosine距离度量，确保距离阈值可解释、可调、稳定
+                self.chroma_client.create_collection(
+                    collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
     
     def _load_static_context(self):
         static_file = PATHS["static_context_dir"] / "prompts.json"
@@ -61,54 +123,306 @@ class ContextManager:
         return self.static_context.get(context_type, "")
     
     def add_to_rag(self, text: str, metadata: Dict, collection: str = "default"):
+        """添加文档到RAG数据库，使用UUID+时间戳生成唯一ID"""
         if collection == "default":
             collection = CHROMA_CONFIG["collection_executions"]
         
         coll = self.chroma_client.get_collection(collection)
-        embedding = self.embedding_model.encode(text).tolist()
+        # 使用passage前缀进行embedding
+        embedding = self._embed_passage(text)
         
         existing = coll.get()
         
-        # 如果是executions集合，检查是否超过30条，超过则删除第一条
+        # 如果是executions集合，检查是否超过30条，超过则删除最旧的记录
         if collection == CHROMA_CONFIG["collection_executions"]:
             if existing['ids'] and len(existing['ids']) >= 30:
-                # 删除第一条记录（按ID排序，删除最小的ID）
-                sorted_ids = sorted(existing['ids'])
-                oldest_id = sorted_ids[0]
+                # 按metadata中的created_at排序，删除最旧的记录
+                metadatas = existing.get('metadatas', [])
+                ids = existing['ids']
+                
+                # 为没有created_at的记录添加默认值
+                items_with_time = []
+                for i, meta in enumerate(metadatas):
+                    created_at = meta.get('created_at', 0) if meta else 0
+                    items_with_time.append((ids[i], created_at))
+                
+                # 按created_at排序，删除最小的（最旧的）
+                items_with_time.sort(key=lambda x: x[1])
+                oldest_id = items_with_time[0][0]
                 coll.delete(ids=[oldest_id])
         
-        new_id = f"{collection}_{len(existing['ids']) if existing['ids'] else 0}"
+        # 使用UUID+时间戳生成唯一ID，避免并发冲突和覆盖问题
+        timestamp_ms = int(time.time() * 1000)
+        unique_suffix = uuid4().hex[:8]
+        new_id = f"{collection}_{timestamp_ms}_{unique_suffix}"
+        
+        # 在metadata中添加created_at时间戳，用于后续排序删除
+        metadata_with_time = metadata.copy()
+        metadata_with_time['created_at'] = timestamp_ms
         
         coll.add(
             embeddings=[embedding],
             documents=[text],
-            metadatas=[metadata],
+            metadatas=[metadata_with_time],
             ids=[new_id]
         )
     
-    def load_dynamic_context(self, query: str, top_k: int = None, collection: str = "default") -> List[Dict]:
+    def _extract_keywords(self, query: str) -> List[str]:
+        """从查询中提取关键词：中文词块、数字、下划线、工具名等"""
+        keywords = []
+        
+        # 提取中文词块（简单规则：连续的中文字符）
+        chinese_words = re.findall(r'[\u4e00-\u9fff]+', query)
+        keywords.extend(chinese_words)
+        
+        # 提取数字（包括带单位的数字）
+        numbers = re.findall(r'\d+', query)
+        keywords.extend(numbers)
+        
+        # 提取工具名
+        tool_names = [
+            "buffer_filter_tool", "elevation_filter_tool", 
+            "vegetation_filter_tool", "slope_filter_tool"
+        ]
+        for tool in tool_names:
+            if tool in query.lower():
+                keywords.append(tool)
+        
+        # 提取单位名
+        unit_names = [
+            "轻步兵", "重装步兵", "机械化步兵", "坦克部队", "反坦克步兵",
+            "自行火炮", "牵引火炮", "防空部队", "狙击手", "特种部队",
+            "装甲侦察单位", "工兵部队", "后勤保障部队", "指挥单位", "无人机侦察控制单元"
+        ]
+        for unit in unit_names:
+            if unit in query:
+                keywords.append(unit)
+        
+        return list(set(keywords))  # 去重
+    
+    def _calculate_keyword_score(self, doc_text: str, keywords: List[str]) -> float:
+        """计算文档的关键词匹配分数"""
+        if not keywords:
+            return 0.0
+        
+        doc_lower = doc_text.lower()
+        score = 0.0
+        
+        for keyword in keywords:
+            # 数字和工具名权重更高
+            if keyword.isdigit() or "tool" in keyword.lower():
+                weight = 2.0
+            else:
+                weight = 1.0
+            
+            # 计算命中次数
+            count = doc_lower.count(keyword.lower())
+            score += count * weight
+        
+        # 归一化（简单除以关键词数量）
+        return score / len(keywords) if keywords else 0.0
+    
+    def _calculate_metadata_boost(self, metadata: Dict, query: str, keywords: List[str]) -> float:
+        """计算元数据匹配加分：unit/type/tool强约束"""
+        boost = 0.0
+        if not metadata:
+            return boost
+        
+        # unit匹配加分
+        unit_in_meta = metadata.get("unit", "")
+        if unit_in_meta:
+            # 检查query或keywords中是否提到该unit
+            if unit_in_meta in query or unit_in_meta in keywords:
+                boost += RAG_CONFIG["metadata_boost_unit"]
+        
+        # type匹配加分
+        type_in_meta = metadata.get("type", "")
+        if type_in_meta:
+            if "部署" in query or "配置" in query:
+                if type_in_meta == "deployment_rule":
+                    boost += RAG_CONFIG["metadata_boost_type"]
+            if "射程" in query:
+                if type_in_meta == "equipment_info":
+                    boost += RAG_CONFIG["metadata_boost_type"]
+        
+        # tool匹配加分
+        tool_in_meta = metadata.get("tool", "")
+        if tool_in_meta:
+            if tool_in_meta in query or tool_in_meta in keywords:
+                boost += RAG_CONFIG["metadata_boost_type"]
+        
+        return boost
+    
+    def _retrieve_from_collection(
+        self, 
+        collection: str, 
+        query: str, 
+        query_embedding: List[float],
+        oversample: int
+    ) -> List[Dict]:
+        """从单个collection中检索候选文档"""
+        coll = self.chroma_client.get_collection(collection)
+        
+        # 向量召回：先召回 oversample 条候选
+        n_results = RAG_CONFIG["top_k"] * oversample
+        results = coll.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results
+        )
+        
+        candidates = []
+        if results["documents"] and len(results["documents"][0]) > 0:
+            for i, doc in enumerate(results["documents"][0]):
+                distance = results["distances"][0][i] if results["distances"] else 1.0
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                
+                candidates.append({
+                    "text": doc,
+                    "metadata": metadata,
+                    "distance": distance,
+                    "collection": collection
+                })
+        
+        return candidates
+    
+    def load_dynamic_context(self, query: str, top_k: int = None, collection: str = None) -> List[Dict]:
+        """混合检索：关键词粗召回 + 向量精排/融合，支持多库并查和距离阈值过滤"""
         if top_k is None:
             top_k = RAG_CONFIG["top_k"]
         
-        if collection == "default":
-            collection = CHROMA_CONFIG["collection_executions"]
+        # 路由到相应的collection(s)
+        if collection is None:
+            target_collections = self._route_collection(query)
+        else:
+            if collection == "default":
+                target_collections = [CHROMA_CONFIG["collection_executions"]]
+            else:
+                target_collections = [collection]
         
-        coll = self.chroma_client.get_collection(collection)
-        query_embedding = self.embedding_model.encode(query).tolist()
+        logger.info(f"[RAG路由] query='{query}' → collections={target_collections}")
         
-        results = coll.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k
-        )
+        # 使用query前缀进行embedding
+        query_embedding = self._embed_query(query)
         
+        # 提取关键词
+        keywords = self._extract_keywords(query)
+        logger.info(f"[RAG关键词] extracted keywords={keywords}")
+        
+        # 从每个collection召回候选
+        all_candidates = []
+        for coll_name in target_collections:
+            candidates = self._retrieve_from_collection(
+                coll_name, query, query_embedding, RAG_CONFIG["oversample"]
+            )
+            all_candidates.extend(candidates)
+            logger.info(f"[RAG召回] collection={coll_name}, candidates={len(candidates)}")
+        
+        if not all_candidates:
+            logger.warning("[RAG] 未找到任何候选文档")
+            return []
+        
+        # 距离阈值过滤 + 融合打分
+        max_distance = RAG_CONFIG["max_distance"]
+        w_sem = RAG_CONFIG["w_sem"]
+        w_kw = RAG_CONFIG["w_kw"]
+        
+        scored_candidates = []
+        for candidate in all_candidates:
+            distance = candidate["distance"]
+            
+            # 距离阈值过滤：只保留distance <= max_distance的候选
+            if distance > max_distance:
+                continue
+            
+            # 计算语义相似度分数（distance越小，相似度越高）
+            semantic_score = 1.0 - distance
+            
+            # 计算关键词匹配分数
+            keyword_score = self._calculate_keyword_score(candidate["text"], keywords)
+            
+            # 计算元数据加分
+            metadata_boost = self._calculate_metadata_boost(
+                candidate["metadata"], query, keywords
+            )
+            
+            # 融合打分
+            final_score = w_sem * semantic_score + w_kw * keyword_score + metadata_boost
+            
+            scored_candidates.append({
+                **candidate,
+                "semantic_score": semantic_score,
+                "keyword_score": keyword_score,
+                "metadata_boost": metadata_boost,
+                "final_score": final_score
+            })
+        
+        # 按final_score降序排序
+        scored_candidates.sort(key=lambda x: x["final_score"], reverse=True)
+        
+        logger.info(f"[RAG过滤] 阈值过滤前={len(all_candidates)}, 过滤后={len(scored_candidates)}")
+        
+        # 动态top_k：如果过滤后不足min_k，放宽阈值一档
+        min_k = RAG_CONFIG["min_k"]
+        if len(scored_candidates) < min_k and len(all_candidates) > len(scored_candidates):
+            # 放宽阈值：使用更宽松的阈值（增加0.1）
+            relaxed_max_distance = max_distance + 0.1
+            logger.warning(f"[RAG降级] 结果不足{min_k}条，放宽阈值至{relaxed_max_distance}")
+            
+            # 重新处理被过滤掉的候选
+            for candidate in all_candidates:
+                if candidate["distance"] <= relaxed_max_distance:
+                    # 检查是否已经在scored_candidates中
+                    if not any(c["text"] == candidate["text"] for c in scored_candidates):
+                        distance = candidate["distance"]
+                        semantic_score = 1.0 - distance
+                        keyword_score = self._calculate_keyword_score(candidate["text"], keywords)
+                        metadata_boost = self._calculate_metadata_boost(
+                            candidate["metadata"], query, keywords
+                        )
+                        final_score = w_sem * semantic_score + w_kw * keyword_score + metadata_boost
+                        
+                        scored_candidates.append({
+                            **candidate,
+                            "semantic_score": semantic_score,
+                            "keyword_score": keyword_score,
+                            "metadata_boost": metadata_boost,
+                            "final_score": final_score,
+                            "low_confidence": True  # 标记为低置信度
+                        })
+            
+            # 重新排序
+            scored_candidates.sort(key=lambda x: x["final_score"], reverse=True)
+        
+        # 取top_k
+        final_results = scored_candidates[:top_k]
+        
+        # 记录最终结果详情
+        logger.info(f"[RAG最终结果] 返回{len(final_results)}条:")
+        for i, result in enumerate(final_results):
+            logger.info(
+                f"  [{i+1}] collection={result['collection']}, "
+                f"distance={result['distance']:.3f}, "
+                f"semantic={result['semantic_score']:.3f}, "
+                f"keyword={result['keyword_score']:.3f}, "
+                f"metadata_boost={result['metadata_boost']:.3f}, "
+                f"final={result['final_score']:.3f}, "
+                f"low_confidence={result.get('low_confidence', False)}"
+            )
+        
+        # 返回格式兼容旧接口
         contexts = []
-        if results["documents"] and len(results["documents"][0]) > 0:
-            for i, doc in enumerate(results["documents"][0]):
-                contexts.append({
-                    "text": doc,
-                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
-                    "distance": results["distances"][0][i] if results["distances"] else None
-                })
+        for result in final_results:
+            contexts.append({
+                "text": result["text"],
+                "metadata": result["metadata"],
+                "distance": result["distance"],
+                "semantic_score": result["semantic_score"],
+                "keyword_score": result["keyword_score"],
+                "metadata_boost": result["metadata_boost"],
+                "final_score": result["final_score"],
+                "low_confidence": result.get("low_confidence", False),
+                "collection": result["collection"]
+            })
         
         return contexts
     
@@ -283,7 +597,8 @@ class ContextManager:
             military_units = self._get_military_units_rules()
             
             for i, unit in enumerate(military_units):
-                embedding = self.embedding_model.encode(unit["text"]).tolist()
+                # 使用passage前缀进行embedding
+                embedding = self._embed_passage(unit["text"])
                 knowledge_coll.add(
                     embeddings=[embedding],
                     documents=[unit["text"]],
@@ -309,7 +624,8 @@ class ContextManager:
             equipment_info = self._get_equipment_info()
             
             for i, equipment in enumerate(equipment_info):
-                embedding = self.embedding_model.encode(equipment["text"]).tolist()
+                # 使用passage前缀进行embedding
+                embedding = self._embed_passage(equipment["text"])
                 equipment_coll.add(
                     embeddings=[embedding],
                     documents=[equipment["text"]],
@@ -347,7 +663,8 @@ class ContextManager:
             military_units = self._get_military_units_rules()
             
             for i, unit in enumerate(military_units):
-                embedding = self.embedding_model.encode(unit["text"]).tolist()
+                # 使用passage前缀进行embedding
+                embedding = self._embed_passage(unit["text"])
                 knowledge_coll.add(
                     embeddings=[embedding],
                     documents=[unit["text"]],
@@ -376,7 +693,8 @@ class ContextManager:
             equipment_info = self._get_equipment_info()
             
             for i, equipment in enumerate(equipment_info):
-                embedding = self.embedding_model.encode(equipment["text"]).tolist()
+                # 使用passage前缀进行embedding
+                embedding = self._embed_passage(equipment["text"])
                 equipment_coll.add(
                     embeddings=[embedding],
                     documents=[equipment["text"]],
@@ -406,7 +724,8 @@ class ContextManager:
             ]
             
             for i, execution in enumerate(sample_executions):
-                embedding = self.embedding_model.encode(execution["text"]).tolist()
+                # 使用passage前缀进行embedding
+                embedding = self._embed_passage(execution["text"])
                 executions_coll.add(
                     embeddings=[embedding],
                     documents=[execution["text"]],
