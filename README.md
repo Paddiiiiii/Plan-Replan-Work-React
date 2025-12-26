@@ -84,25 +84,27 @@
     ▼
 ┌─────────────┐
 │  Plan阶段   │ ◄── RAG检索: knowledge + tasks + equipment
-│  (规划)     │     生成高层计划（不涉及具体工具参数）
+│  (规划)     │     动态获取工具schema
+│             │     生成包含具体参数的计划（type + params）
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
 │ 用户审查    │ ◄── 可选：用户提出修改意见
-│  (可选)     │
+│  (可选)     │     查看计划详情、筛选步骤列表、LLM思考过程
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
 │ Replan阶段  │ ◄── 根据反馈或执行失败重新规划
-│ (重新规划)  │     生成详细计划（包含工具和参数）
+│ (重新规划)  │     动态获取工具schema
+│             │     生成包含具体参数的计划（type + params）
 └──────┬──────┘
        │
        ▼
 ┌─────────────┐
-│  Work阶段   │ ◄── ReAct循环: Think → Act → Observe
-│  (执行)     │     工具链式调用
+│  Work阶段   │ ◄── 直接使用计划中的params参数
+│  (执行)     │     工具链式调用（自动填充input_geojson_path）
 └──────┬──────┘
        │
        ├── 成功 ──► 输出结果
@@ -132,22 +134,26 @@
   - `knowledge`集合：军事单位部署规则
   - `tasks`集合：历史任务和计划
   - `equipment`集合：装备信息（含射程）
-- **高层计划生成**：生成不涉及具体工具参数的抽象计划
-- **知识融合**：将检索到的知识融入规划过程
+- **具体参数规划**：为每个步骤生成包含具体筛选指标参数（params）的详细计划
+- **工具schema动态获取**：自动获取工具的参数结构，确保参数准确性
+- **知识融合**：将检索到的知识融入规划过程，合理推断参数值
 
 #### 3. **ReplanModule（重新规划模块）**
 自适应规划调整器：
 - **失败分析**：分析执行失败原因
-- **自动重规划**：根据执行结果自动调整计划
-- **反馈驱动**：根据用户反馈修改计划
+- **自动重规划**：根据执行结果自动调整计划（包含具体参数）
+- **反馈驱动**：根据用户反馈修改计划参数
+- **工具schema动态获取**：自动获取工具的参数结构
 - **装备信息考虑**：重新规划时考虑装备射程等因素
+- **与Plan一致**：使用相同的输出格式（type + params）
 
 #### 4. **WorkAgent（执行智能体）**
-ReAct架构的执行器：
-- **Think阶段**：分析步骤描述，检索相关执行历史
-- **Act阶段**：选择合适的工具和参数
-- **Observe阶段**：观察执行结果，决定下一步行动
-- **工具链管理**：自动处理工具间的数据流转
+高效执行器（简化ReAct架构）：
+- **直接执行**：优先使用计划中提供的params参数，无需重新推断
+- **工具映射**：根据步骤的type字段自动选择对应工具
+- **参数验证**：确保参数正确性后再执行
+- **工具链管理**：自动处理工具间的数据流转（input_geojson_path自动填充）
+- **Fallback机制**：如果计划未提供params，才根据描述推断参数
 
 #### 5. **ContextManager（上下文管理器）**
 智能体的"记忆"系统：
@@ -210,6 +216,10 @@ ReAct架构的执行器：
 
 **Streamlit Web界面**，包含4个功能模块：
 - **智能体任务**：完整的任务流程（输入→规划→审查→执行）
+  - 计划详情：显示完整的计划JSON
+  - LLM思考过程：仅显示思考部分（不含JSON）
+  - 筛选步骤列表：显示每个步骤的类型、描述和具体参数
+  - 匹配的部署规则和装备信息
 - **历史结果**：查看和管理历史执行结果
 - **数据库管理**：管理知识库、任务历史、执行记录
 - **API接口文档**：完整的API使用说明
@@ -280,9 +290,8 @@ AIgen/
 ├── frontend.py              # Streamlit前端界面
 ├── update_knowledge.py      # 知识库更新脚本
 ├── work/
-│   ├── agent.py             # ReAct执行智能体
+│   ├── agent.py             # 执行智能体（直接使用计划参数）
 │   └── tools/               # 工具集合
-│       ├── base_tool.py     # 工具基类
 │       ├── base_tool.py     # 工具基类
 │       ├── buffer_filter_tool.py
 │       ├── elevation_filter_tool.py
@@ -290,7 +299,8 @@ AIgen/
 │       └── vegetation_filter_tool.py
 ├── data/                    # 数据目录
 │   ├── nj_merged.osm        # OSM地理数据
-│   └── dem.tif              # DEM高程数据
+│   ├── dem.tif              # DEM高程数据
+│   └── WorldCover_*.tif     # ESA WorldCover植被数据
 ├── result/                  # 结果输出目录
 └── context/                 # 上下文存储
     ├── static/              # 静态上下文（提示词）
@@ -298,6 +308,34 @@ AIgen/
     └── dynamic/             # 动态上下文（RAG）
         └── chroma_db/       # ChromaDB向量数据库
 ```
+
+## 🔄 关键设计改进
+
+### 职能分离优化
+
+**Plan阶段（规划）**：
+- 负责理解任务需求
+- 检索相关知识和历史经验
+- **为每个步骤确定具体的筛选指标参数**
+- 动态获取工具schema确保参数准确性
+- 输出格式：`{type, description, params}`
+
+**Work阶段（执行）**：
+- **直接使用计划中的params参数**，无需重新推断
+- 根据type字段自动映射到对应工具
+- 自动处理工具间的数据流转
+- 仅在计划未提供params时才推断参数
+
+**Replan阶段（重新规划）**：
+- 与Plan阶段使用相同的输出格式
+- 根据反馈或执行失败调整参数值
+- 动态获取工具schema确保参数准确性
+
+### 工具Schema动态获取
+
+- Plan和Replan模块都会动态获取工具的实际schema
+- 确保LLM了解每个工具的参数类型、描述和要求
+- 提高参数生成的准确性和一致性
 
 ## 🧠 智能体工作流程示例
 
@@ -312,14 +350,31 @@ AIgen/
 │  └─ 规则：距离居民区100-300米，中等高程，缓坡
 ├─ RAG检索tasks集合 → 找到相似历史任务
 ├─ RAG检索equipment集合 → 找到相关装备信息
-└─ 生成计划：
+├─ 动态获取工具schema → 了解每个工具的参数结构
+└─ 生成计划（包含具体参数）：
    {
      "goal": "为轻步兵寻找合适的部署位置",
      "steps": [
-       {"step_id": 1, "description": "筛选距离建筑和道路100-300米的区域", "type": "buffer"},
-       {"step_id": 2, "description": "筛选中等高程区域", "type": "elevation"},
-       {"step_id": 3, "description": "筛选缓坡或平缓地形", "type": "slope"}
-     ]
+       {
+         "step_id": 1,
+         "description": "筛选距离建筑和道路100-300米的区域",
+         "type": "buffer",
+         "params": {"buffer_distance": 200}
+       },
+       {
+         "step_id": 2,
+         "description": "筛选中等高程区域",
+         "type": "elevation",
+         "params": {"min_elev": 100, "max_elev": 500}
+       },
+       {
+         "step_id": 3,
+         "description": "筛选缓坡或平缓地形",
+         "type": "slope",
+         "params": {"max_slope": 15}
+       }
+     ],
+     "estimated_steps": 3
    }
 ```
 
@@ -333,14 +388,18 @@ AIgen/
 **3. Work阶段（执行）**
 ```
 智能体行为：
-├─ Step 1: Think → 分析"筛选距离建筑和道路100-300米的区域"
-│  └─ 选择buffer_filter_tool，参数buffer_distance=200（取中值）
-├─ Step 2: Think → 分析"筛选中等高程区域"
-│  └─ 选择elevation_filter_tool，使用Step1的输出作为输入
-├─ Step 3: Think → 分析"筛选缓坡或平缓地形"
-│  └─ 选择slope_filter_tool，使用Step2的输出作为输入
-└─ Step 4: Think → 分析"筛选草地或裸地类型"
-   └─ 选择vegetation_filter_tool，使用Step3的输出作为输入，参数vegetation_types=[30, 60]
+├─ Step 1: 直接使用计划中的params
+│  └─ type="buffer" → buffer_filter_tool
+│  └─ params={"buffer_distance": 200} → 直接调用
+├─ Step 2: 直接使用计划中的params
+│  └─ type="elevation" → elevation_filter_tool
+│  └─ params={"min_elev": 100, "max_elev": 500}
+│  └─ input_geojson_path自动填充（Step1的输出）
+├─ Step 3: 直接使用计划中的params
+│  └─ type="slope" → slope_filter_tool
+│  └─ params={"max_slope": 15}
+│  └─ input_geojson_path自动填充（Step2的输出）
+└─ 所有步骤直接执行，无需重新推断参数
 ```
 
 **4. 结果输出**
@@ -438,8 +497,12 @@ python update_knowledge.py
 ### 修改提示词
 
 1. 直接编辑 `context/static/prompts.json`
-2. 或使用前端"数据库管理"功能
-3. 系统会自动加载最新提示词
+   - `plan_prompt`: 规划阶段的提示词（要求生成包含具体参数的步骤）
+   - `replan_prompt`: 重新规划阶段的提示词（与plan_prompt格式一致）
+   - `work_prompt`: 执行阶段的提示词（直接使用计划中的params）
+   - `system_prompt`: 系统级提示词
+2. 系统会在启动时自动加载最新提示词
+3. **注意**：如果 `prompts.json` 不存在，系统会抛出错误提示创建文件
 
 ### 扩展知识库
 

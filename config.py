@@ -31,7 +31,7 @@ CHROMA_CONFIG = {
     "collection_equipment": "equipment"
 }
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "BAAI/bge-large-zh-v1.5"
 
 RAG_CONFIG = {
     "top_k": 3,
