@@ -16,6 +16,12 @@ class WorkAgent:
         }
 
     def execute_plan(self, plan: Dict) -> Dict[str, Any]:
+        if "sub_plans" in plan:
+            return self._execute_sub_plans(plan)
+        else:
+            return self._execute_single_plan(plan)
+    
+    def _execute_single_plan(self, plan: Dict) -> Dict[str, Any]:
         steps = plan.get("steps", [])
         results = []
         last_result_path = None
@@ -66,6 +72,79 @@ class WorkAgent:
             "results": results,
             "plan": plan,
             "final_result_path": last_result_path
+        }
+    
+    def _execute_sub_plans(self, plan: Dict) -> Dict[str, Any]:
+        sub_plans = plan.get("sub_plans", [])
+        sub_results = []
+        all_success = True
+
+        for sub_plan in sub_plans:
+            unit = sub_plan.get("unit", "未知单位")
+            steps = sub_plan.get("steps", [])
+            results = []
+            last_result_path = None
+
+            for i, step in enumerate(steps):
+                tool_name = step.get("tool")
+                if last_result_path and tool_name and tool_name in self.tools:
+                    tool = self.tools[tool_name]
+                    tool_params = tool.parameters
+                    if "input_geojson_path" in tool_params:
+                        if "params" not in step:
+                            step["params"] = {}
+                        if "input_geojson_path" not in step["params"] or not step["params"]["input_geojson_path"]:
+                            step["params"]["input_geojson_path"] = last_result_path
+                elif last_result_path and step.get("type") in ["elevation", "slope", "vegetation"]:
+                    if "params" not in step:
+                        step["params"] = {}
+                    step["params"]["input_geojson_path"] = last_result_path
+
+                try:
+                    step_result = self._execute_step(step)
+                    results.append(step_result)
+
+                    if step_result.get("success") and step_result.get("result", {}).get("result_path"):
+                        last_result_path = step_result["result"]["result_path"]
+
+                    if not step_result.get("success", False):
+                        all_success = False
+                        sub_results.append({
+                            "unit": unit,
+                            "success": False,
+                            "error": step_result.get("error"),
+                            "result_path": None,
+                            "steps": results
+                        })
+                        break
+                except Exception as e:
+                    import traceback
+                    error_detail = traceback.format_exc()
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"执行{unit}步骤 {i+1} 时出错: {str(e)}")
+                    logger.error(error_detail)
+                    all_success = False
+                    sub_results.append({
+                        "unit": unit,
+                        "success": False,
+                        "error": f"执行步骤 {i+1} 时出错: {str(e)}",
+                        "result_path": None,
+                        "steps": results
+                    })
+                    break
+            else:
+                sub_results.append({
+                    "unit": unit,
+                    "success": True,
+                    "result_path": last_result_path,
+                    "steps": results
+                })
+
+        return {
+            "success": all_success,
+            "sub_results": sub_results,
+            "plan": plan
         }
 
     def _execute_step(self, step: Dict) -> Dict[str, Any]:

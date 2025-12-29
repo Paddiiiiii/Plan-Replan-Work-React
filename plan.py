@@ -77,8 +77,13 @@ class PlanModule:
 
         plan = self._parse_plan(response)
 
-        logger.info(f"Plan阶段 - 解析后的步骤数: {len(plan.get('steps', []))}")
-        logger.info(f"Plan阶段 - 步骤类型: {[s.get('type', 'N/A') for s in plan.get('steps', [])]}")
+        if "sub_plans" in plan:
+            logger.info(f"Plan阶段 - 多任务模式，子计划数: {len(plan.get('sub_plans', []))}")
+            for i, sub_plan in enumerate(plan.get('sub_plans', [])):
+                logger.info(f"Plan阶段 - 子计划[{i+1}] 单位: {sub_plan.get('unit', 'N/A')}, 步骤数: {len(sub_plan.get('steps', []))}")
+        else:
+            logger.info(f"Plan阶段 - 单任务模式，解析后的步骤数: {len(plan.get('steps', []))}")
+            logger.info(f"Plan阶段 - 步骤类型: {[s.get('type', 'N/A') for s in plan.get('steps', [])]}")
         plan["llm_response"] = response
 
         plan["matched_rules"] = []
@@ -117,10 +122,16 @@ class PlanModule:
         if json_block_match:
             try:
                 plan = json.loads(json_block_match.group(1))
-                if "steps" not in plan:
-                    plan["steps"] = []
-                if "estimated_steps" not in plan:
-                    plan["estimated_steps"] = len(plan.get("steps", []))
+                
+                if "sub_plans" in plan:
+                    for sub_plan in plan.get("sub_plans", []):
+                        if "steps" not in sub_plan:
+                            sub_plan["steps"] = []
+                else:
+                    if "steps" not in plan:
+                        plan["steps"] = []
+                    if "estimated_steps" not in plan:
+                        plan["estimated_steps"] = len(plan.get("steps", []))
 
                 thinking_part = response[:json_block_match.start()].strip()
 
@@ -152,10 +163,16 @@ class PlanModule:
         if json_match:
             try:
                 plan = json.loads(json_match.group())
-                if "steps" not in plan:
-                    plan["steps"] = []
-                if "estimated_steps" not in plan:
-                    plan["estimated_steps"] = len(plan.get("steps", []))
+                
+                if "sub_plans" in plan:
+                    for sub_plan in plan.get("sub_plans", []):
+                        if "steps" not in sub_plan:
+                            sub_plan["steps"] = []
+                else:
+                    if "steps" not in plan:
+                        plan["steps"] = []
+                    if "estimated_steps" not in plan:
+                        plan["estimated_steps"] = len(plan.get("steps", []))
 
                 thinking_part = response[:json_match.start()].strip()
 

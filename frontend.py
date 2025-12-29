@@ -6,7 +6,7 @@ from pathlib import Path
 import json
 import time
 import requests
-from typing import Optional
+from typing import Optional, Dict
 import os
 
 os.environ.setdefault("PYTHONUTF8", "1")
@@ -35,6 +35,103 @@ def load_geojson(file_path: str):
     except Exception as e:
         st.error(f"加载GeoJSON失败: {e}")
         return None
+
+def _display_result(sub_result: Dict, plan: Dict):
+    """显示单个子结果（用于多任务模式）"""
+    unit = sub_result.get("unit", "未知单位")
+    result_path = sub_result.get("result_path")
+    steps = sub_result.get("steps", [])
+    
+    if not sub_result.get("success", False):
+        st.error(f"{unit} 执行失败: {sub_result.get('error', '未知错误')}")
+        return
+    
+    if not result_path:
+        st.warning(f"{unit} 未生成结果文件")
+        return
+    
+    gdf = load_geojson(result_path)
+    if gdf is None:
+        st.error(f"{unit} 无法加载结果文件")
+        return
+    
+    st.subheader(f"{unit} - 结果地图")
+    m = create_map(gdf)
+    if m:
+        st.components.v1.html(m._repr_html_(), height=600)
+    
+    st.subheader(f"{unit} - 统计信息")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("区域数量", len(gdf))
+    with col2:
+        total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
+        st.metric("总面积 (m²)", f"{total_area:,.0f}")
+    with col3:
+        total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
+        st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+    
+    st.subheader(f"{unit} - 筛选参数")
+    filter_params = {}
+    
+    for step_result in steps:
+        if step_result.get("success"):
+            tool_name = step_result.get("tool", "")
+            step_params = step_result.get("params", {})
+            
+            if tool_name == "buffer_filter_tool":
+                buffer_dist = step_params.get("buffer_distance")
+                if buffer_dist is not None:
+                    filter_params["缓冲区距离"] = f"{buffer_dist} 米"
+            elif tool_name == "elevation_filter_tool":
+                min_elev = step_params.get("min_elev")
+                max_elev = step_params.get("max_elev")
+                if min_elev is not None or max_elev is not None:
+                    elev_str = ""
+                    if min_elev is not None:
+                        elev_str += f"{min_elev} 米"
+                    if max_elev is not None:
+                        if elev_str:
+                            elev_str += " - "
+                        elev_str += f"{max_elev} 米"
+                    filter_params["高程范围"] = elev_str
+            elif tool_name == "slope_filter_tool":
+                min_slope = step_params.get("min_slope")
+                max_slope = step_params.get("max_slope")
+                if min_slope is not None or max_slope is not None:
+                    slope_str = ""
+                    if min_slope is not None:
+                        slope_str += f"{min_slope}°"
+                    if max_slope is not None:
+                        if slope_str:
+                            slope_str += " - "
+                        slope_str += f"{max_slope}°"
+                    filter_params["坡度范围"] = slope_str
+            elif tool_name == "vegetation_filter_tool":
+                veg_types = step_params.get("vegetation_types", [])
+                exclude_types = step_params.get("exclude_types", [])
+                if veg_types:
+                    veg_names = {
+                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                    }
+                    veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                    filter_params["植被类型"] = ", ".join(veg_list)
+                elif exclude_types:
+                    veg_names = {
+                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                    }
+                    exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                    filter_params["排除植被类型"] = ", ".join(exclude_list)
+    
+    if filter_params:
+        for key, value in filter_params.items():
+            st.write(f"**{key}**: {value}")
+    else:
+        st.info("无筛选参数信息")
 
 def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
     if gdf is None or gdf.empty:
@@ -169,21 +266,44 @@ def main():
                             st.text(llm_response)
 
                 st.markdown("### 筛选步骤列表")
-                steps = plan.get('steps', [])
-                estimated_steps = plan.get('estimated_steps', len(steps))
-                st.write(f"**预计步骤数**: {estimated_steps}")
-                st.write(f"**步骤列表**:")
-                for i, step in enumerate(steps, 1):
-                    step_desc = step.get('description', step.get('type', 'N/A'))
-                    step_type = step.get('type', '')
-                    step_params = step.get('params', {})
+                
+                if plan.get('sub_plans'):
+                    sub_plans = plan.get('sub_plans', [])
+                    total_steps = sum(len(sub_plan.get('steps', [])) for sub_plan in sub_plans)
+                    st.write(f"**多任务模式** - 共 {len(sub_plans)} 个子任务，总计 {total_steps} 个步骤")
+                    
+                    for sub_idx, sub_plan in enumerate(sub_plans, 1):
+                        unit = sub_plan.get('unit', f'任务{sub_idx}')
+                        steps = sub_plan.get('steps', [])
+                        st.markdown(f"#### {sub_idx}. {unit} ({len(steps)} 个步骤)")
+                        
+                        for i, step in enumerate(steps, 1):
+                            step_desc = step.get('description', step.get('type', 'N/A'))
+                            step_type = step.get('type', '')
+                            step_params = step.get('params', {})
 
-                    if step_params:
-                        params_str = json.dumps(step_params, ensure_ascii=False)
-                        st.write(f"{i}. **{step_type}** - {step_desc}")
-                        st.write(f"   参数: `{params_str}`")
-                    else:
-                        st.write(f"{i}. **{step_type}** - {step_desc}")
+                            if step_params:
+                                params_str = json.dumps(step_params, ensure_ascii=False)
+                                st.write(f"   {i}. **{step_type}** - {step_desc}")
+                                st.write(f"      参数: `{params_str}`")
+                            else:
+                                st.write(f"   {i}. **{step_type}** - {step_desc}")
+                else:
+                    steps = plan.get('steps', [])
+                    estimated_steps = plan.get('estimated_steps', len(steps))
+                    st.write(f"**预计步骤数**: {estimated_steps}")
+                    st.write(f"**步骤列表**:")
+                    for i, step in enumerate(steps, 1):
+                        step_desc = step.get('description', step.get('type', 'N/A'))
+                        step_type = step.get('type', '')
+                        step_params = step.get('params', {})
+
+                        if step_params:
+                            params_str = json.dumps(step_params, ensure_ascii=False)
+                            st.write(f"{i}. **{step_type}** - {step_desc}")
+                            st.write(f"   参数: `{params_str}`")
+                        else:
+                            st.write(f"{i}. **{step_type}** - {step_desc}")
 
                 if plan.get('matched_rules'):
                     st.markdown("### 匹配的部署规则")
@@ -277,43 +397,54 @@ def main():
                                 result_data = result.get("result", {})
                                 work_result = result_data.get("result", {})
 
-                                final_result_path = None
-                                if work_result.get("final_result_path"):
-                                    final_result_path = work_result["final_result_path"]
-                                elif work_result.get("results"):
-                                    for r in work_result.get("results", []):
-                                        if r.get("success") and r.get("result", {}).get("result_path"):
-                                            final_result_path = r["result"]["result_path"]
-                                            break
+                                if work_result.get("sub_results"):
+                                    sub_results = work_result.get("sub_results", [])
+                                    if len(sub_results) > 1:
+                                        tabs = st.tabs([f"{sub_result.get('unit', f'任务{i+1}')}" for i, sub_result in enumerate(sub_results)])
+                                        for i, (tab, sub_result) in enumerate(zip(tabs, sub_results)):
+                                            with tab:
+                                                _display_result(sub_result, plan)
+                                    else:
+                                        if sub_results:
+                                            _display_result(sub_results[0], plan)
+                                else:
+                                    final_result_path = None
+                                    if work_result.get("final_result_path"):
+                                        final_result_path = work_result["final_result_path"]
+                                    elif work_result.get("results"):
+                                        for r in work_result.get("results", []):
+                                            if r.get("success") and r.get("result", {}).get("result_path"):
+                                                final_result_path = r["result"]["result_path"]
+                                                break
 
-                                if final_result_path:
-                                    gdf = load_geojson(final_result_path)
+                                    if final_result_path:
+                                        gdf = load_geojson(final_result_path)
 
-                                    if gdf is not None:
-                                        st.subheader("结果地图")
-                                        m = create_map(gdf)
-                                        if m:
-                                            st.components.v1.html(m._repr_html_(), height=600)
+                                        if gdf is not None:
+                                            st.subheader("结果地图")
+                                            m = create_map(gdf)
+                                            if m:
+                                                st.components.v1.html(m._repr_html_(), height=600)
 
-                                        st.subheader("统计信息")
-                                        col1, col2, col3 = st.columns(3)
-                                        with col1:
-                                            st.metric("区域数量", len(gdf))
-                                        with col2:
-                                            total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
-                                            st.metric("总面积 (m²)", f"{total_area:,.0f}")
-                                        with col3:
-                                            total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
-                                            st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+                                            st.subheader("统计信息")
+                                            col1, col2, col3 = st.columns(3)
+                                            with col1:
+                                                st.metric("区域数量", len(gdf))
+                                            with col2:
+                                                total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
+                                                st.metric("总面积 (m²)", f"{total_area:,.0f}")
+                                            with col3:
+                                                total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
+                                                st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
 
-                                        st.subheader("筛选参数")
-                                        filter_params = {}
+                                            st.subheader("筛选参数")
+                                            filter_params = {}
 
-                                        if work_result.get("results"):
-                                            for step_result in work_result.get("results", []):
-                                                if step_result.get("success"):
-                                                    tool_name = step_result.get("tool", "")
-                                                    step_params = step_result.get("params", {})
+                                            if work_result.get("results"):
+                                                for step_result in work_result.get("results", []):
+                                                    if step_result.get("success"):
+                                                        tool_name = step_result.get("tool", "")
+                                                        step_params = step_result.get("params", {})
 
                                                     if tool_name == "buffer_filter_tool":
                                                         buffer_dist = step_params.get("buffer_distance")

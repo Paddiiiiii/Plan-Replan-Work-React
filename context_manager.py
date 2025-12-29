@@ -323,7 +323,7 @@ class ContextManager:
 
         min_k = RAG_CONFIG["min_k"]
         if len(scored_candidates) < min_k and len(all_candidates) > len(scored_candidates):
-            relaxed_max_distance = max_distance + 0.1
+            relaxed_max_distance = max_distance + 0.5
             logger.warning(f"[RAG降级] 结果不足{min_k}条，放宽阈值至{relaxed_max_distance}")
 
             for candidate in all_candidates:
@@ -420,7 +420,7 @@ class ContextManager:
                 },
                 {
                     "text": "坦克部队适合部署在低至中等高程的开阔区域，整体坡度较为平缓。部署地表类型可为草地、耕地或裸地/稀疏植被，满足装甲单位机动与展开需求。配置位置与居民区和建筑保持500-1000米缓冲距离。",
-                    "metadata": {"unit": "坦克部队", "type": "deployment_rule"}
+                    "metadata": {"unit": "坦克", "type": "deployment_rule"}
                 },
                 {
                     "text": "反坦克步兵适合部署在中等至较高高程的伏击位置，坡度为中等坡度或局部陡坡。部署区域地表类型可为灌木、树或建筑边缘，利于隐蔽与形成俯射角度。与居民区保持150-400米缓冲距离。",
@@ -436,7 +436,7 @@ class ContextManager:
                 },
                 {
                     "text": "防空部队适合部署在中等至较高高程位置，坡度为平缓或中等坡度。部署地表类型可为裸地/稀疏植被或草地，有利于雷达与火力视野展开。与居民区保持300-700米缓冲距离。",
-                    "metadata": {"unit": "防空部队", "type": "deployment_rule"}
+                    "metadata": {"unit": "防空", "type": "deployment_rule"}
                 },
                 {
                     "text": "狙击手适合配置在较高高程制高点，局部坡度为中等或陡坡。部署区域地表类型可为树、灌木或建筑阴影区域，利于隐蔽观察与精确射击。与居民区保持50-200米缓冲距离。",
@@ -464,7 +464,7 @@ class ContextManager:
                 },
                 {
                     "text": "无人机侦察控制单元适合部署在中高高程区域，坡度较小，确保设备稳定运行。部署地表类型可为裸地/稀疏植被或低矮草地。与居民区保持400-800米缓冲距离。",
-                    "metadata": {"unit": "无人机侦察控制单元", "type": "deployment_rule"}
+                    "metadata": {"unit": "无人机", "type": "deployment_rule"}
                 }
             ]
 
