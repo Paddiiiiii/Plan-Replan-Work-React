@@ -189,7 +189,7 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "帮我找找无人机可以部署在哪里"
+            st.session_state.task_input = "帮我找找无人机可以部署在哪里、坦克可以部署在哪里、步兵可以部署在哪里"
 
         if st.session_state.current_stage == "input":
             st.subheader("步骤1: 输入任务")
