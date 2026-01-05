@@ -702,8 +702,6 @@ def main():
             st.session_state.selected_collection = "knowledge"
         if "db_data" not in st.session_state:
             st.session_state.db_data = None
-        if "db_refresh_key" not in st.session_state:
-            st.session_state.db_refresh_key = 0
 
         st.markdown("---")
         if "tab3_should_load" not in st.session_state:
@@ -724,11 +722,53 @@ def main():
                 st.rerun()
 
         with col2:
-            if st.button("刷新数据", key="refresh_db"):
-                st.session_state.db_data = None
-                st.session_state.db_refresh_key += 1
-                st.session_state.tab3_should_load = True
-                st.rerun()
+            # 清空集合按钮（带确认）
+            clear_confirm_key = f"clear_confirm_{st.session_state.selected_collection}"
+            if clear_confirm_key not in st.session_state:
+                st.session_state[clear_confirm_key] = False
+            
+            if not st.session_state[clear_confirm_key]:
+                if st.button("清空整个集合", key="clear_collection", type="secondary"):
+                    st.session_state[clear_confirm_key] = True
+                    st.rerun()
+            else:
+                st.warning(f"⚠️ 确认清空 {st.session_state.selected_collection} 集合？此操作不可恢复！")
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button("确认清空", key="confirm_clear", type="primary"):
+                        with st.spinner(f"正在清空 {st.session_state.selected_collection} 集合..."):
+                            try:
+                                response = requests.delete(
+                                    f"{API_URL}/api/knowledge/clear/{st.session_state.selected_collection}",
+                                    timeout=API_TIMEOUT
+                                )
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    if result.get("success"):
+                                        st.success(f"✓ {result.get('message', '集合已清空')}")
+                                        st.session_state.db_data = None
+                                        st.session_state[clear_confirm_key] = False
+                                        st.session_state.tab3_should_load = True
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"清空失败: {result.get('message', '未知错误')}")
+                                        st.session_state[clear_confirm_key] = False
+                                else:
+                                    try:
+                                        error_detail = response.json()
+                                        error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
+                                    except:
+                                        error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
+                                    st.error(f"API请求失败: {error_msg}")
+                                    st.session_state[clear_confirm_key] = False
+                            except requests.exceptions.RequestException as e:
+                                st.error(f"连接API失败: {e}")
+                                st.session_state[clear_confirm_key] = False
+                with col_no:
+                    if st.button("取消", key="cancel_clear"):
+                        st.session_state[clear_confirm_key] = False
+                        st.rerun()
 
         if st.session_state.selected_collection == "knowledge":
             if st.button("批量更新（重新初始化军事单位规则）", type="primary"):
@@ -757,7 +797,7 @@ def main():
         should_load = (
             st.session_state.tab3_should_load or 
             (st.session_state.db_data is None and not st.session_state.tab3_should_load)
-        ) and (st.session_state.db_data is None or st.session_state.db_refresh_key > 0)
+        )
 
         if should_load:
             with st.spinner("正在加载数据..."):
@@ -771,7 +811,6 @@ def main():
                         result = response.json()
                         if result.get("success"):
                             st.session_state.db_data = result
-                            st.session_state.db_refresh_key = 0
                             st.session_state.tab3_should_load = False
                         else:
                             st.error("获取数据失败")

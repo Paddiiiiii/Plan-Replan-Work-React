@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, HTTPException  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from fastapi.responses import JSONResponse, FileResponse  # type: ignore
+from pydantic import BaseModel, Field  # type: ignore
 from typing import Dict, Any, Optional, List
-import uvicorn
+import uvicorn  # type: ignore
 import threading
 from pathlib import Path
 import sys
@@ -46,8 +46,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-orchestrator = Orchestrator()
-context_manager = ContextManager()
+# 延迟初始化，避免启动时阻塞
+orchestrator = None
+context_manager = None
+
+def get_orchestrator():
+    """获取Orchestrator实例（延迟初始化）"""
+    global orchestrator
+    if orchestrator is None:
+        orchestrator = Orchestrator()
+    return orchestrator
+
+def get_context_manager():
+    """获取ContextManager实例（延迟初始化）"""
+    global context_manager
+    if context_manager is None:
+        context_manager = ContextManager()
+    return context_manager
 
 class TaskRequest(BaseModel):
     task: str = Field(..., description="任务描述")
@@ -96,7 +111,7 @@ async def root():
 @app.post("/api/plan", response_model=TaskResponse)
 async def generate_plan(request: PlanRequest):
     try:
-        result = orchestrator.generate_plan(request.task)
+        result = get_orchestrator().generate_plan(request.task)
         return TaskResponse(
             success=result.get("success", False),
             result=result,
@@ -123,7 +138,7 @@ async def replan_with_feedback(request: ReplanRequest):
 
         logger.info(f"收到重新规划请求，反馈: {request.feedback[:100]}")
 
-        result = orchestrator.replan_with_feedback(request.plan, request.feedback)
+        result = get_orchestrator().replan_with_feedback(request.plan, request.feedback)
 
         logger.info("重新规划成功")
         return TaskResponse(
@@ -152,7 +167,7 @@ async def replan_with_feedback(request: ReplanRequest):
 @app.post("/api/execute", response_model=TaskResponse)
 async def execute_plan(request: ExecuteRequest):
     try:
-        result = orchestrator.execute_plan(request.plan)
+        result = get_orchestrator().execute_plan(request.plan)
         return TaskResponse(
             success=result.get("success", False),
             result=result,
@@ -173,7 +188,7 @@ async def execute_plan(request: ExecuteRequest):
 @app.post("/api/task", response_model=TaskResponse)
 async def submit_task(request: TaskRequest):
     try:
-        result = orchestrator.execute_task(request.task)
+        result = get_orchestrator().execute_task(request.task)
         return TaskResponse(
             success=result.get("success", False),
             result=result,
@@ -185,7 +200,7 @@ async def submit_task(request: TaskRequest):
 @app.get("/api/tools")
 async def get_tools():
     tools = {}
-    for name, tool in orchestrator.work_agent.tools.items():
+    for name, tool in get_orchestrator().work_agent.tools.items():
         tools[name] = {
             "name": tool.name,
             "description": tool.description,
@@ -205,7 +220,7 @@ async def get_collections():
         for collection_name in ["knowledge", "equipment"]:
             try:
                 entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection_name, "MilitaryUnit")
-                entities = context_manager.kag.get_entities_by_type(entity_type)
+                entities = get_context_manager().kag.get_entities_by_type(entity_type)
                 collections_info[collection_name] = {
                     "name": collection_name,
                     "count": len(entities)
@@ -226,7 +241,7 @@ async def get_knowledge(collection: str = "knowledge"):
     """获取指定集合的所有数据"""
     try:
         entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-        entities = context_manager.kag.get_entities_by_type(entity_type)
+        entities = get_context_manager().kag.get_entities_by_type(entity_type)
 
         items = []
         for entity in entities:
@@ -262,7 +277,7 @@ async def add_knowledge(request: KnowledgeAddRequest):
         properties = request.metadata.copy()
         properties["text"] = request.text
 
-        context_manager.kag.add_entity(
+        get_context_manager().kag.add_entity(
             entity_type=entity_type,
             entity_id=new_id,
             properties=properties,
@@ -284,11 +299,11 @@ async def add_knowledge(request: KnowledgeAddRequest):
 async def delete_knowledge(item_id: str, collection: str = "knowledge"):
     """删除指定集合中的特定记录"""
     try:
-        entity = context_manager.kag.get_entity(item_id)
+        entity = get_context_manager().kag.get_entity(item_id)
         if entity is None:
             raise HTTPException(status_code=404, detail=f"记录 {item_id} 不存在")
 
-        context_manager.kag.delete_entity(item_id)
+        get_context_manager().kag.delete_entity(item_id)
 
         logger.info(f"成功从{collection}集合删除记录: {item_id}")
 
@@ -314,12 +329,12 @@ async def clear_collection(collection: str):
             )
 
         entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-        entities = context_manager.kag.get_entities_by_type(entity_type)
+        entities = get_context_manager().kag.get_entities_by_type(entity_type)
 
         if entities:
             count = len(entities)
             for entity in entities:
-                context_manager.kag.delete_entity(entity["id"])
+                get_context_manager().kag.delete_entity(entity["id"])
             logger.info(f"成功清空{collection}集合，共删除{count}条记录")
             return {
                 "success": True,
@@ -342,7 +357,7 @@ async def clear_collection(collection: str):
 async def update_knowledge_base():
     """批量更新knowledge集合（重新初始化军事单位部署规则）"""
     try:
-        count = context_manager.update_knowledge_base()
+        count = get_context_manager().update_knowledge_base()
         logger.info(f"成功更新knowledge集合，共{count}条记录")
 
         return {

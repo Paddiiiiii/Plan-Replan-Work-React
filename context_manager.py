@@ -59,7 +59,9 @@ class ContextManager:
 
     def _init_kag(self):
         """初始化KAG知识图谱适配器"""
+        use_openspg = KAG_CONFIG.get("use_openspg", True)
         self.kag = KAGAdapter(
+            use_openspg=use_openspg,
             embedding_model_name=KAG_CONFIG["embedding_model"],
             llm_config=LLM_CONFIG,
             kag_config=KAG_CONFIG,
@@ -77,8 +79,10 @@ class ContextManager:
                 f"提示词文件不存在: {static_file}\n"
                 "请创建 context/static/prompts.json 文件，包含 plan_prompt, replan_prompt, work_prompt, system_prompt 字段"
             )
-
-        self._init_rag_data()
+        
+        # 不再自动初始化知识图谱数据
+        # 只有在通过API、更新脚本或前端明确调用update_knowledge_base()或update_equipment_base()时才会进行抽取
+        logger.info("知识图谱已加载，等待用户主动更新")
 
     def _save_static_context(self):
         os.makedirs(PATHS["static_context_dir"], exist_ok=True)
@@ -369,19 +373,14 @@ class ContextManager:
             for entity in existing_entities:
                 self.kag.delete_entity(entity["id"])
 
-            military_units = get_military_units_rules()
+            knowledge_text = get_military_units_rules()
+            count = self.kag.extract_entities_from_text(
+                text=knowledge_text,
+                entity_type="MilitaryUnit",
+                collection_name="knowledge"
+            )
 
-            for i, unit in enumerate(military_units):
-                properties = unit["metadata"].copy()
-                properties["text"] = unit["text"]
-                self.kag.add_entity(
-                    entity_type="MilitaryUnit",
-                    entity_id=f"knowledge_{i}",
-                    properties=properties,
-                    text=unit["text"]
-                )
-
-            return len(military_units)
+            return count
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -396,78 +395,16 @@ class ContextManager:
             for entity in existing_entities:
                 self.kag.delete_entity(entity["id"])
 
-            equipment_info = get_equipment_info()
+            equipment_text = get_equipment_info()
+            count = self.kag.extract_entities_from_text(
+                text=equipment_text,
+                entity_type="Equipment",
+                collection_name="equipment"
+            )
 
-            for i, equipment in enumerate(equipment_info):
-                properties = equipment["metadata"].copy()
-                properties["text"] = equipment["text"]
-                self.kag.add_entity(
-                    entity_type="Equipment",
-                    entity_id=f"equipment_{i}",
-                    properties=properties,
-                    text=equipment["text"]
-                )
-
-            return len(equipment_info)
+            return count
         except Exception as e:
             import traceback
             traceback.print_exc()
             raise Exception(f"更新装备信息库失败: {str(e)}")
 
-    def _init_rag_data(self):
-        """初始化KAG知识图谱数据"""
-        existing_knowledge = self.kag.get_entities_by_type("MilitaryUnit")
-        should_init = len(existing_knowledge) == 0
-
-        if not should_init:
-            has_military_units = any(
-                e.get("properties", {}).get("type") == "deployment_rule" and "unit" in e.get("properties", {})
-                for e in existing_knowledge
-            )
-            if not has_military_units:
-                should_init = True
-                for entity in existing_knowledge:
-                    self.kag.delete_entity(entity["id"])
-
-        if should_init:
-            from update_knowledge import get_military_units_rules
-            military_units = get_military_units_rules()
-
-            for i, unit in enumerate(military_units):
-                properties = unit["metadata"].copy()
-                properties["text"] = unit["text"]
-                self.kag.add_entity(
-                    entity_type="MilitaryUnit",
-                    entity_id=f"knowledge_{i}",
-                    properties=properties,
-                    text=unit["text"]
-                )
-            print(f"已初始化 {len(military_units)} 条军事单位部署规则到KAG知识图谱")
-
-        existing_equipment = self.kag.get_entities_by_type("Equipment")
-        should_init_equipment = len(existing_equipment) == 0
-
-        if not should_init_equipment:
-            has_equipment = any(
-                e.get("properties", {}).get("type") == "equipment_info"
-                for e in existing_equipment
-            )
-            if not has_equipment:
-                should_init_equipment = True
-                for entity in existing_equipment:
-                    self.kag.delete_entity(entity["id"])
-
-        if should_init_equipment:
-            from update_equipment import get_equipment_info
-            equipment_info = get_equipment_info()
-
-            for i, equipment in enumerate(equipment_info):
-                properties = equipment["metadata"].copy()
-                properties["text"] = equipment["text"]
-                self.kag.add_entity(
-                    entity_type="Equipment",
-                    entity_id=f"equipment_{i}",
-                    properties=properties,
-                    text=equipment["text"]
-                )
-            print(f"已初始化 {len(equipment_info)} 条装备信息到KAG知识图谱")

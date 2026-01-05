@@ -36,6 +36,7 @@ KAG_CONFIG = {
     "metadata_boost_unit": 0.35,
     "metadata_boost_type": 0.10,
     "use_llm_reasoning": False,
+    "use_openspg": True,
     "kg_storage_path": str(PATHS["kag_storage_dir"]),
     "embedding_model": EMBEDDING_MODEL
 }
