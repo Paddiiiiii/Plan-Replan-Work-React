@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer
 import torch
 from config import PATHS, EMBEDDING_MODEL, KAG_CONFIG
-from context.kag_solver import KAGSolver
+# KAG solver 已移到 KAG 项目内部
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,20 @@ class ContextManager:
     def _init_kag_solver(self):
         """初始化KAG推理问答器（新版，基于KAG开发者模式）"""
         try:
-            self.kag_solver = KAGSolver()
+            # 导入KAG项目内部的solver wrapper
+            import sys
+            from pathlib import Path
+            
+            # 添加KAG路径
+            base_dir = Path(__file__).parent.parent
+            kag_path = base_dir / "KAG"
+            if str(kag_path) not in sys.path:
+                sys.path.insert(0, str(kag_path))
+            
+            from kag.examples.MilitaryDeployment.solver.kag_solver_wrapper import KAGSolverWrapper
+            
+            # 创建solver实例
+            self.kag_solver = KAGSolverWrapper()
             logger.info("KAG推理问答器初始化完成")
         except Exception as e:
             logger.warning(f"KAG推理器初始化失败: {e}")
