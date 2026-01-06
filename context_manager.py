@@ -38,19 +38,41 @@ class ContextManager:
             import sys
             from pathlib import Path
             
-            # 添加KAG路径
-            base_dir = Path(__file__).parent.parent
+            # 添加KAG路径（确保kag模块可以被导入）
+            # __file__ 是 context_manager.py，parent 是 AIgen 目录
+            base_dir = Path(__file__).parent
             kag_path = base_dir / "KAG"
-            if str(kag_path) not in sys.path:
-                sys.path.insert(0, str(kag_path))
+            kag_path_str = str(kag_path.resolve())  # 使用绝对路径
             
-            from kag.examples.MilitaryDeployment.solver.kag_solver_wrapper import KAGSolverWrapper
+            if kag_path_str not in sys.path:
+                sys.path.insert(0, kag_path_str)
+                logger.debug(f"已添加KAG路径到sys.path: {kag_path_str}")
+            
+            # 验证KAG目录和kag模块是否存在
+            kag_module_path = kag_path / "kag"
+            if not kag_module_path.exists():
+                raise FileNotFoundError(f"KAG模块目录不存在: {kag_module_path}")
+            
+            # 先测试kag模块是否可以导入
+            try:
+                import kag
+                logger.debug(f"KAG模块导入成功，路径: {getattr(kag, '__file__', 'unknown')}")
+            except ImportError as e:
+                logger.error(f"无法导入kag模块: {e}")
+                logger.error(f"KAG路径: {kag_path_str}")
+                logger.error(f"KAG目录存在: {kag_path.exists()}")
+                logger.error(f"kag模块目录存在: {kag_module_path.exists()}")
+                logger.error(f"当前sys.path前5项: {sys.path[:5]}")
+                raise
+            
+            # 导入KAG solver wrapper
+            from KAG.kag.examples.MilitaryDeployment.solver.kag_solver_wrapper import KAGSolverWrapper
             
             # 创建solver实例
             self.kag_solver = KAGSolverWrapper()
             logger.info("KAG推理问答器初始化完成")
         except Exception as e:
-            logger.warning(f"KAG推理器初始化失败: {e}")
+            logger.warning(f"KAG推理器初始化失败: {e}", exc_info=True)
             self.kag_solver = None
 
     def _load_static_context(self):
@@ -179,16 +201,59 @@ class ContextManager:
                 result = self.kag_solver.query(query)
                 # 将KAG推理结果转换为检索格式
                 candidates = []
-                if result.get("references"):
-                    for ref in result["references"]:
+                
+                # 如果有references，使用references
+                references = result.get("references", [])
+                if references and len(references) > 0:
+                    for ref in references:
                         candidates.append({
                             "text": ref.get("text", ""),
                             "metadata": ref.get("metadata", {}),
                             "distance": ref.get("distance", 0.0)
                         })
+                
+                # 如果没有references但有answer，将answer作为文本上下文返回
+                if not candidates and result.get("answer"):
+                    answer = result.get("answer", "")
+                    # 清理reference标记，保留纯文本
+                    import re
+                    clean_answer = re.sub(r'<reference[^>]*></reference>', '', answer)
+                    clean_answer = clean_answer.strip()
+                    
+                    if clean_answer:
+                        candidates.append({
+                            "text": clean_answer,
+                            "metadata": {
+                                "source": "kag_reasoning",
+                                "type": "answer",
+                                "query": query
+                            },
+                            "distance": 0.0  # KAG推理结果，距离设为0表示高相关性
+                        })
+                        logger.info(f"[KAG] 使用推理答案作为上下文，长度: {len(clean_answer)}")
+                
+                # 如果有raw_result且是字符串，也尝试使用
+                if not candidates and result.get("raw_result"):
+                    raw_result = result.get("raw_result")
+                    if isinstance(raw_result, str) and raw_result.strip():
+                        import re
+                        clean_text = re.sub(r'<reference[^>]*></reference>', '', raw_result)
+                        clean_text = clean_text.strip()
+                        if clean_text:
+                            candidates.append({
+                                "text": clean_text,
+                                "metadata": {
+                                    "source": "kag_reasoning",
+                                    "type": "raw_result",
+                                    "query": query
+                                },
+                                "distance": 0.0
+                            })
+                            logger.info(f"[KAG] 使用原始结果作为上下文，长度: {len(clean_text)}")
+                
                 return candidates
             except Exception as e:
-                logger.warning(f"KAG推理器检索失败: {e}")
+                logger.warning(f"KAG推理器检索失败: {e}", exc_info=True)
         
         # 如果KAG推理器不可用，返回空结果
         logger.warning("KAG推理器未初始化，返回空结果")
