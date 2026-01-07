@@ -415,26 +415,5 @@ class ContextManager:
                 "error": str(e)
             }
 
-    def save_context(self, context_id: str, data: Dict):
-        context_file = PATHS["context_dir"] / f"{context_id}.json"
-        with open(context_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def load_context(self, context_id: str) -> Optional[Dict]:
-        context_file = PATHS["context_dir"] / f"{context_id}.json"
-        if context_file.exists():
-            with open(context_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return None
-
-    def compress_context(self, context: Dict, max_tokens: int = 2000) -> Dict:
-        if len(str(context)) < max_tokens:
-            return context
-
-        compressed = {
-            "summary": str(context)[:max_tokens],
-            "full_length": len(str(context))
-        }
-        return compressed
 
 
