@@ -1,0 +1,30 @@
+#------------project configuration start----------------#
+pipeline_name: default_pipeline
+
+#------------kag-solver configuration start----------------#
+
+kag_retriever_executor: &kag_retriever_executor_conf
+  type: kag_hybrid_retrieval_executor
+  retrievers: "{retrievers}"
+  merger:
+    type: kag_merger
+  enable_summary:  false
+
+solver_pipeline:
+  type: naive_rag_pipeline
+  executors:
+    - *kag_retriever_executor_conf
+  generator:
+    type: llm_index_generator
+    llm_client: "{chat_llm}"
+    generated_prompt:
+      type: default_refer_generator_prompt
+    chunk_reranker:
+      type: rerank_by_vector
+      vectorize_model: "{vectorize_model}"
+    enable_ref: true
+
+llm: "{chat_llm}"
+vectorize_model: "{vectorize_model}"
+
+#------------kag-solver configuration end----------------#

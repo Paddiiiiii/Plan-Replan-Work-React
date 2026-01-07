@@ -1,0 +1,212 @@
+#------------project configuration start----------------#
+# KAG配置说明：
+# 1. LLM模型：使用DeepSeek在线API（不再使用本地qwen3）
+# 2. Embedding模型：使用硅基流动在线API（不再使用本地embedding）
+# 3. 外层系统（main.py等）仍使用本地模型，不受此配置影响
+
+# DeepSeek在线语言模型（当前使用）
+openie_llm: &openie_llm
+  type: maas
+  base_url: https://api.deepseek.com/v1
+  api_key: sk-667fd9da7e8049e6ac13a8d7eae93288
+  model: deepseek-chat
+  timeout: 300
+  max_tokens: 4096
+  enable_check: false
+
+chat_llm: &chat_llm
+  type: maas
+  base_url: https://api.deepseek.com/v1
+  api_key: sk-667fd9da7e8049e6ac13a8d7eae93288
+  model: deepseek-chat
+  timeout: 300
+  max_tokens: 4096
+  enable_check: false
+
+# 带限流的Embedding模型配置（直接在openai模型中实现限流）
+# 使用在线API，通过速率限制避免超限
+vectorize_model: &vectorize_model
+  api_key: sk-xtpojqrgbqomvlyvtlvpmwbjfpwynbbrqsekxvotxkoxqerw
+  base_url: https://api.siliconflow.cn/v1
+  model: BAAI/bge-large-zh-v1.5
+  type: openai
+  vector_dimensions: 1024
+  max_rate: 30  # 每秒最大30个请求，降低频率避免超限
+  time_period: 1.0
+  enable_check: false
+vectorizer: *vectorize_model
+
+# 本地模型配置（已停用，如需使用请取消注释并注释掉上面的在线配置）
+# openie_llm: &openie_llm
+#   type: maas
+#   base_url: http://192.168.1.200:11434/v1
+#   api_key: ollama
+#   model: qwen3:32b
+#   timeout: 600
+#   max_tokens: 4096
+#   enable_check: false
+# 
+# chat_llm: &chat_llm
+#   type: maas
+#   base_url: http://192.168.1.200:11434/v1
+#   api_key: ollama
+#   model: qwen3:32b
+#   timeout: 600
+#   max_tokens: 4096
+#   enable_check: false
+
+log:
+  level: INFO
+project:
+  biz_scene: default
+  host_addr: http://192.168.1.131:8887
+  id: '14'
+  language: zh
+  namespace: MilitaryDeploy
+
+#------------project configuration end----------------#
+
+#------------kag-builder configuration start----------------#
+kag_builder_pipeline:
+  chain:
+    type: unstructured_builder_chain # kag.builder.default_chain.DefaultUnstructuredBuilderChain
+    extractor:
+      type: knowledge_unit_extractor # kag.builder.component.extractor.schema_free_extractor.SchemaFreeExtractor
+      llm: *openie_llm
+      ner_prompt:
+        type: knowledge_unit_ner
+      triple_prompt:
+        type: knowledge_unit_triple
+      kn_prompt:
+        type: knowledge_unit
+    reader:
+      type: txt_reader # kag.builder.component.reader.txt_reader.TXTReader
+    post_processor:
+      type: kag_post_processor # kag.builder.component.postprocessor.kag_postprocessor.KAGPostProcessor
+    splitter:
+      type: length_splitter # kag.builder.component.splitter.length_splitter.LengthSplitter
+      split_length: 500
+      window_length: 100
+    vectorizer:
+      type: batch_vectorizer # kag.builder.component.vectorizer.batch_vectorizer.BatchVectorizer
+      vectorize_model: *vectorize_model
+    writer:
+      type: kg_writer # kag.builder.component.writer.kg_writer.KGWriter
+  num_threads_per_chain: 2
+  num_chains: 4
+  scanner:
+    type: dir_file_scanner # kag.builder.component.scanner.directory_scanner.DirectoryScanner
+#------------kag-builder configuration end----------------#
+
+#------------kag-solver configuration start----------------#
+search_api: &search_api
+  type: openspg_search_api #kag.solver.tools.search_api.impl.openspg_search_api.OpenSPGSearchAPI
+
+graph_api: &graph_api
+  type: openspg_graph_api #kag.solver.tools.graph_api.impl.openspg_graph_api.OpenSPGGraphApi
+
+kg_cs: &kg_cs
+  type: kg_cs_open_spg
+  priority: 0
+  path_select:
+    type: exact_one_hop_select
+    graph_api: *graph_api
+    search_api: *search_api
+  entity_linking:
+    type: entity_linking
+    graph_api: *graph_api
+    search_api: *search_api
+    recognition_threshold: 0.9
+    exclude_types:
+      - Chunk
+      - AtomicQuery
+      - KnowledgeUnit
+      - Summary
+      - Outline
+      - Doc
+
+kg_fr: &kg_fr
+  type: kg_fr_knowledge_unit
+  top_k: 20
+  graph_api: *graph_api
+  search_api: *search_api
+  vectorize_model: *vectorize_model
+  path_select:
+    type: fuzzy_one_hop_select
+    llm_client: *openie_llm
+    graph_api: *graph_api
+    search_api: *search_api
+  ppr_chunk_retriever_tool:
+    type: ppr_chunk_retriever
+    llm_client: *chat_llm
+    graph_api: *graph_api
+    search_api: *search_api
+  entity_linking:
+    type: entity_linking
+    graph_api: *graph_api
+    search_api: *search_api
+    recognition_threshold: 0.8
+    exclude_types:
+      - Chunk
+      - AtomicQuery
+      - KnowledgeUnit
+      - Summary
+      - Outline
+      - Doc
+
+rc: &rc
+  type: rc_open_spg
+  vector_chunk_retriever:
+    type: vector_chunk_retriever
+    vectorize_model: *vectorize_model
+    score_threshold: 0.65
+    search_api: *search_api
+  graph_api: *graph_api
+  search_api: *search_api
+  vectorize_model: *vectorize_model
+  top_k: 20
+
+kag_hybrid_executor: &kag_hybrid_executor_conf
+  type: kag_hybrid_retrieval_executor
+  retrievers:
+    - *kg_cs
+    - *kg_fr
+    - *rc
+  merger:
+    type: kag_merger
+  enable_summary: true
+
+kag_output_executor: &kag_output_executor_conf
+  type: kag_output_executor
+  llm_module: *chat_llm
+
+kag_deduce_executor: &kag_deduce_executor_conf
+  type: kag_deduce_executor
+  llm_module: *chat_llm
+
+py_code_based_math_executor: &py_code_based_math_executor_conf
+  type: py_code_based_math_executor
+  llm: *chat_llm
+
+kag_solver_pipeline:
+  type: kag_static_pipeline
+  planner:
+    type: kag_static_planner
+    llm: *chat_llm
+    plan_prompt:
+      type: default_lf_static_planning
+    rewrite_prompt:
+      type: default_query_rewrite
+  executors:
+    - *kag_hybrid_executor_conf
+    - *py_code_based_math_executor_conf
+    - *kag_deduce_executor_conf
+    - *kag_output_executor_conf
+  generator:
+    type: llm_index_generator
+    llm_client: *chat_llm
+    generated_prompt:
+      type: default_refer_generator_prompt
+    enable_ref: true
+#------------kag-solver configuration end----------------#
+

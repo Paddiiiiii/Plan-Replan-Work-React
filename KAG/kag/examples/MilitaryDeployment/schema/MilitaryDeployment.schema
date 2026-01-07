@@ -1,0 +1,358 @@
+namespace MilitaryDeploy
+
+# 军事单位类型
+MilitaryUnit(军事单位): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        unitType(单位类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        suitableElevation(适合高程): Text
+            index: Text
+        suitableSlope(适合坡度): Text
+            index: Text
+        suitableTerrain(适合地形): Text
+            index: Text
+        bufferDistance(缓冲距离): Text
+            index: Text
+        deploymentPrinciple(部署原则): Text
+            index: TextAndVector
+        effectiveRange(有效射程): Text
+            index: Text
+        maxRange(最大射程): Text
+            index: Text
+    relations:
+        suitableFor(适合部署): TerrainFeature
+            properties:
+                condition(条件): Text
+                    index: Text
+        requires(需要): TerrainFeature
+            properties:
+                requirement(需求): Text
+                    index: Text
+        deployedAt(部署在): TerrainFeature
+            properties:
+                distance(距离): Text
+                    index: Text
+        equippedWith(装备): Weapon
+        belongsTo(属于): UnitOrganization
+        executes(执行): CombatTask
+
+# 地形特征
+TerrainFeature(地形特征): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        featureType(特征类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        width(宽度): Text
+            index: Text
+        depth(深度): Text
+            index: Text
+        height(高度): Text
+            index: Text
+        slope(坡度): Text
+            index: Text
+    relations:
+        contains(包含): Obstacle
+        locatedAt(位于): DefensePosition
+
+# 武器装备
+Weapon(武器): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        weaponType(武器类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        effectiveRange(有效射程): Text
+            index: Text
+        maxRange(最大射程): Text
+            index: Text
+
+# 障碍物
+Obstacle(障碍物): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        obstacleType(障碍类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        width(宽度): Text
+            index: Text
+        depth(深度): Text
+            index: Text
+        height(高度): Text
+            index: Text
+    relations:
+        protectedBy(受保护): MilitaryUnit
+        monitoredBy(受监视): ObservationPost
+        coveredBy(受掩护): FireSupport
+
+# 防御阵地
+DefensePosition(防御阵地): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        positionType(阵地类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        frontWidth(正面宽度): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+    relations:
+        contains(包含): CombatPosition
+        defendedBy(由...防守): MilitaryUnit
+        locatedAt(位于): TerrainFeature
+
+# 战斗阵地
+CombatPosition(战斗阵地): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        positionType(阵地类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+
+# 单位组织
+UnitOrganization(单位组织): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        orgType(组织类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        contains(包含): MilitaryUnit
+        commands(指挥): MilitaryUnit
+
+# 战斗任务
+CombatTask(战斗任务): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        taskType(任务类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+
+# 观察哨
+ObservationPost(观察哨): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        monitors(监视): Obstacle
+        belongsTo(属于): MilitaryUnit
+
+# 火力支援
+FireSupport(火力支援): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        supportType(支援类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        covers(掩护): Obstacle
+        supports(支援): MilitaryUnit
+
+# 部署规则
+DeploymentRule(部署规则): EntityType
+    properties:
+        ruleName(规则名称): Text
+            index: Text
+        ruleContent(规则内容): Text
+            index: TextAndVector
+        applicableUnit(适用单位): MilitaryUnit
+        applicableTerrain(适用地形): TerrainFeature
+
+# 防御地域（文档：前方警戒地域/主战地域/后方地域）
+DefenseArea(防御地域): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        areaType(地域类型): Text
+            index: Text
+        frontage(防御正面): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        containsPosition(包含阵地): DefensePosition
+        includesSupportPoint(包含支撑点): SupportPoint
+        hasApproachRoute(接近路): ApproachRoute
+        hasKillZone(火力歼敌区): KillZone
+        hasObservationPost(观察哨): ObservationPost
+        hasCommandPost(指挥所): CommandPost
+        defendedBy(防守分队): MilitaryUnit
+
+
+# 支撑点（文档：支撑点防御/依托村镇支撑点等）
+SupportPoint(支撑点): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        pointType(支撑点类型): Text
+            index: Text
+        frontage(防御正面): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        locatedAt(位于): TerrainFeature
+        containsPosition(包含阵地): CombatPosition
+        defendedBy(防守): MilitaryUnit
+        hasKillZone(火力歼敌区): KillZone
+        hasObstacleBelt(障碍带): ObstacleBelt
+        hasObservationPost(观察哨): ObservationPost
+        hasCommandPost(指挥所): CommandPost
+
+
+# 敌主要接近路 / 林间小路等
+ApproachRoute(接近路): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        routeType(接近路类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        leadsToArea(通向地域): DefenseArea
+        leadsToPosition(通向阵地): DefensePosition
+        leadsToSupportPoint(通向支撑点): SupportPoint
+        passesThrough(经过地形): TerrainFeature
+        coveredBy(受火力控制): FireSupport
+        observedBy(受监视): ObservationPost
+
+
+# 火力歼敌区（文档：沿主要接近路设置若干火力歼敌区）
+KillZone(火力歼敌区): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        width(宽度): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        alongRoute(沿接近路): ApproachRoute
+        supportedByPosition(依托阵地): DefensePosition
+        supportedBySupportPoint(依托支撑点): SupportPoint
+        coveredBy(受火力覆盖): FireSupport
+        observedBy(受监视): ObservationPost
+        hasReferencePoint(集火基准点): ReferencePoint
+        includesObstacleBelt(包含障碍带): ObstacleBelt
+
+
+# 集火基准点（文档：规定集火基准点，通常位于主要障碍物附近）
+ReferencePoint(集火基准点): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        radius(影响半径): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        locatedAt(位于): TerrainFeature
+        nearObstacle(靠近障碍物): Obstacle
+        usedInPlan(用于火力计划): FirePlan
+
+
+# 火力计划（计划火力/表定火力/临时召唤火力）
+FirePlan(火力计划): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        planType(计划类型): Text
+            index: Text
+        priority(优先级): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        supportsTask(支援任务): CombatTask
+        assignsSupport(分配火力支援): FireSupport
+        targetsKillZone(打击歼敌区): KillZone
+        usesReferencePoint(使用基准点): ReferencePoint
+
+
+# 障碍带（文档：多道带/间隔/纵深；并要求火力掩护与观察哨监视）
+ObstacleBelt(障碍带): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        beltType(障碍类型): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+        interval(带间间隔): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        containsObstacle(包含障碍物): Obstacle
+        containsMinefield(包含地雷场): Minefield
+        blocksRoute(阻断接近路): ApproachRoute
+        coveredBy(受火力掩护): FireSupport
+        observedBy(受监视): ObservationPost
+        protectedBy(受保护): MilitaryUnit
+
+
+# 地雷场（文档：撒布/应急/防护性地雷场）
+Minefield(地雷场): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        mineType(雷场类型): Text
+            index: Text
+        size(规模): Text
+            index: Text
+        method(敷设方式): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        partOfBelt(隶属障碍带): ObstacleBelt
+        laidBy(敷设): MilitaryUnit
+        coveredBy(受火力掩护): FireSupport
+        observedBy(受监视): ObservationPost
+
+
+# 指挥所（文档：营指挥组/基本指挥所等）
+CommandPost(指挥所): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        cpType(指挥所类型): Text
+            index: Text
+        level(级别): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+    relations:
+        locatedAt(位于): TerrainFeature
+        inArea(所在地域): DefenseArea
+        commands(指挥): UnitOrganization
+        protectedBy(受保护): MilitaryUnit

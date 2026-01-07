@@ -570,45 +570,11 @@ def main():
 
                                 st.markdown("---")
 
-                                if "show_save_dialog" not in st.session_state:
-                                    st.session_state.show_save_dialog = False
-
-                                if st.session_state.show_save_dialog:
-                                    st.info("💾 是否保存本次对话到任务历史？")
-                                    save_col1, save_col2, save_col3 = st.columns([1, 1, 2])
-                                    with save_col1:
-                                        if st.button("是，保存", key="save_task_yes", type="primary"):
-                                            try:
-                                                save_response = requests.post(
-                                                    f"{API_URL}/api/task/save",
-                                                    json={
-                                                        "task": st.session_state.task_input,
-                                                        "plan": st.session_state.current_plan
-                                                    },
-                                                    timeout=API_TIMEOUT
-                                                )
-                                                if save_response.status_code == 200:
-                                                    st.success("✓ 已保存到任务历史")
-                                                    time.sleep(0.5)
-                                                else:
-                                                    st.error("保存失败")
-                                            except Exception as e:
-                                                st.error(f"保存失败: {e}")
-
-                                            st.session_state.current_plan = None
-                                            st.session_state.current_stage = "input"
-                                            st.session_state.show_save_dialog = False
-                                            st.rerun()
-                                    with save_col2:
-                                        if st.button("不保存", key="save_task_no"):
-                                            st.session_state.current_plan = None
-                                            st.session_state.current_stage = "input"
-                                            st.session_state.show_save_dialog = False
-                                            st.rerun()
-                                else:
-                                    if st.button("开始新任务", type="primary"):
-                                        st.session_state.show_save_dialog = True
-                                        st.rerun()
+                                if st.button("开始新任务", type="primary"):
+                                    # 重置状态，直接回到任务输入界面
+                                    st.session_state.current_plan = None
+                                    st.session_state.current_stage = "input"
+                                    st.rerun()
                             else:
                                 st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
                                 if st.button("返回修改计划"):
