@@ -199,7 +199,7 @@ def main():
             st.session_state.task_input = "帮我找找无人机可以部署在哪里、坦克可以部署在哪里、步兵可以部署在哪里"
 
         if st.session_state.current_stage == "input":
-            st.subheader("步骤1: 输入任务")
+            st.subheader("输入任务")
             task_input = st.text_area(
                 "输入任务描述",
                 value=st.session_state.task_input,
@@ -207,203 +207,27 @@ def main():
                 key="task_input_area"
             )
 
-            if st.button("生成计划", type="primary"):
+            if st.button("执行任务", type="primary"):
                 st.session_state.task_input = task_input
-                with st.spinner("正在生成计划..."):
-                    try:
-                        response = requests.post(
-                            f"{API_URL}/api/plan",
-                            json={"task": task_input},
-                            timeout=API_TIMEOUT
-                        )
+                st.session_state.current_stage = "executing"
+                st.rerun()
 
-                        if response.status_code == 200:
-                            result = response.json()
-                            if result.get("success"):
-                                st.session_state.current_plan = result.get("result", {}).get("plan")
-                                st.session_state.current_stage = "plan_review"
-                                st.rerun()
-                            else:
-                                st.error(f"生成计划失败: {result.get('message', '未知错误')}")
-                        else:
-                            try:
-                                error_detail = response.json()
-                                error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
-                            except:
-                                error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
-                            st.error(f"API请求失败: {error_msg}")
-                    except requests.exceptions.RequestException as e:
-                        st.error(f"连接API失败: {e}")
-
-        elif st.session_state.current_stage == "plan_review":
-            st.subheader("步骤2: 审查计划")
-            st.info("请审查以下计划，如有需要可以提出修改意见")
-
-            plan = st.session_state.current_plan
-            if plan:
-                with st.expander("查看计划详情", expanded=True):
-                    plan_json_str = json.dumps(plan, ensure_ascii=False, indent=2)
-                    st.code(plan_json_str, language="json")
-
-                if plan.get('llm_response'):
-                    st.markdown("### LLM完整思考过程")
-                    with st.expander("查看完整思考过程", expanded=False):
-                        llm_response = plan.get('llm_response', '')
-                        # 确保llm_response是字符串类型
-                        if not isinstance(llm_response, str):
-                            llm_response = str(llm_response) if llm_response else ''
-                        thinking_part = llm_response
-
-                        import re
-                        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', llm_response)
-                        if json_block_match:
-                            thinking_part = llm_response[:json_block_match.start()].strip()
-                        else:
-                            json_match = None
-                            for match in re.finditer(r'\{[\s\S]*\}', llm_response):
-                                try:
-                                    json.loads(match.group())
-                                    json_match = match
-                                    break
-                                except:
-                                    continue
-                            if json_match:
-                                thinking_part = llm_response[:json_match.start()].strip()
-
-                        if thinking_part:
-                            st.text(thinking_part)
-                        else:
-                            st.text(llm_response)
-
-                st.markdown("### 筛选步骤列表")
-                
-                if plan.get('sub_plans'):
-                    sub_plans = plan.get('sub_plans', [])
-                    total_steps = sum(len(sub_plan.get('steps', [])) for sub_plan in sub_plans)
-                    st.write(f"**多任务模式** - 共 {len(sub_plans)} 个子任务，总计 {total_steps} 个步骤")
-                    
-                    for sub_idx, sub_plan in enumerate(sub_plans, 1):
-                        unit = sub_plan.get('unit', f'任务{sub_idx}')
-                        steps = sub_plan.get('steps', [])
-                        st.markdown(f"#### {sub_idx}. {unit} ({len(steps)} 个步骤)")
-                        
-                        for i, step in enumerate(steps, 1):
-                            step_desc = step.get('description', step.get('type', 'N/A'))
-                            step_type = step.get('type', '')
-                            step_params = step.get('params', {})
-
-                            if step_params:
-                                params_str = json.dumps(step_params, ensure_ascii=False)
-                                st.write(f"   {i}. **{step_type}** - {step_desc}")
-                                st.write(f"      参数: `{params_str}`")
-                            else:
-                                st.write(f"   {i}. **{step_type}** - {step_desc}")
-                else:
-                    steps = plan.get('steps', [])
-                    estimated_steps = plan.get('estimated_steps', len(steps))
-                    st.write(f"**预计步骤数**: {estimated_steps}")
-                    st.write(f"**步骤列表**:")
-                    for i, step in enumerate(steps, 1):
-                        step_desc = step.get('description', step.get('type', 'N/A'))
-                        step_type = step.get('type', '')
-                        step_params = step.get('params', {})
-
-                        if step_params:
-                            params_str = json.dumps(step_params, ensure_ascii=False)
-                            st.write(f"{i}. **{step_type}** - {step_desc}")
-                            st.write(f"   参数: `{params_str}`")
-                        else:
-                            st.write(f"{i}. **{step_type}** - {step_desc}")
-
-                if plan.get('matched_rules'):
-                    st.markdown("### 匹配的部署规则")
-                    for idx, rule in enumerate(plan.get('matched_rules', []), 1):
-                        with st.expander(f"规则 {idx}: {rule.get('metadata', {}).get('unit', '未知单位')}", expanded=False):
-                            st.write(rule.get('text', ''))
-                            if rule.get('metadata'):
-                                st.json(rule.get('metadata'))
-
-                if plan.get('matched_equipment'):
-                    st.markdown("### 匹配的装备信息")
-                    for idx, equipment in enumerate(plan.get('matched_equipment', []), 1):
-                        with st.expander(f"装备 {idx}: {equipment.get('metadata', {}).get('unit', '未知装备')}", expanded=False):
-                            st.write(equipment.get('text', ''))
-                            if equipment.get('metadata'):
-                                st.json(equipment.get('metadata'))
-
-                if plan.get('kag_reasoning_answer'):
-                    st.markdown("### 📚 知识库推理结果")
-                    st.info("以下内容来自知识图谱推理，展示了基于结构化知识的专业分析结果，证明数据可溯源。")
-                    with st.expander("查看知识库推理答案", expanded=True):
-                        kag_answer = plan.get('kag_reasoning_answer', '')
-                        # 将答案分段显示，提高可读性
-                        st.markdown(kag_answer)
-
-                st.markdown("---")
-                st.subheader("提出修改意见（可选）")
-                feedback = st.text_area(
-                    "输入您的修改意见（如果满意可直接点击'确认执行'）",
-                    height=100,
-                    placeholder="例如：缓冲区距离改为600米，或者添加坡度筛选..."
-                )
-
-                col1, col2, col3 = st.columns([1, 1, 2])
-                with col1:
-                    if st.button("确认执行", type="primary"):
-                        st.session_state.current_stage = "executing"
-                        st.rerun()
-                with col2:
-                    if st.button("重新输入任务"):
-                        st.session_state.current_plan = None
-                        st.session_state.current_stage = "input"
-                        st.rerun()
-                with col3:
-                    if feedback.strip() and st.button("提交修改意见"):
-                        with st.spinner("正在根据您的意见重新规划..."):
-                            try:
-                                response = requests.post(
-                                    f"{API_URL}/api/replan",
-                                    json={"plan": plan, "feedback": feedback},
-                                    timeout=API_TIMEOUT
-                                )
-
-                                if response.status_code == 200:
-                                    result = response.json()
-                                    if result.get("success"):
-                                        new_plan = result.get("result", {}).get("plan")
-                                        if new_plan:
-                                            st.session_state.current_plan = new_plan
-                                            st.success("计划已更新，请审查新计划")
-                                            st.rerun()
-                                        else:
-                                            st.error("重新规划返回的计划为空")
-                                    else:
-                                        st.error(f"重新规划失败: {result.get('message', '未知错误')}")
-                                else:
-                                    try:
-                                        error_detail = response.json()
-                                        error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
-                                    except:
-                                        error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
-
-                                    st.error(f"API请求失败: {error_msg}")
-                                    with st.expander("查看详细错误信息"):
-                                        st.text(response.text if response.text else "无详细信息")
-                            except requests.exceptions.RequestException as e:
-                                st.error(f"连接API失败: {e}")
-                                st.info("请确保后端服务已启动（运行 main.py）")
+        # 暂时搁置计划审查阶段（保留代码但不使用）
+        # elif st.session_state.current_stage == "plan_review":
+        #     ... (计划审查相关代码已注释，保留以备将来使用)
 
         elif st.session_state.current_stage == "executing":
-            st.subheader("步骤3: 执行计划")
+            st.subheader("执行任务")
 
-            plan = st.session_state.current_plan
-            if plan:
-                with st.spinner("智能体正在执行计划..."):
+            task_input = st.session_state.task_input
+            if task_input:
+                with st.spinner("正在生成计划并执行任务（这可能需要一些时间）..."):
                     try:
+                        # 直接调用完整任务接口（规划+执行）
                         response = requests.post(
-                            f"{API_URL}/api/execute",
-                            json={"plan": plan},
-                            timeout=300
+                            f"{API_URL}/api/task",
+                            json={"task": task_input},
+                            timeout=API_TIMEOUT
                         )
 
                         if response.status_code == 200:
@@ -414,6 +238,9 @@ def main():
 
                                 result_data = result.get("result", {})
                                 work_result = result_data.get("result", {})
+                                plan = result_data.get("plan", {})  # 从结果中获取plan
+                                # 保存plan到session_state，供_display_result使用
+                                st.session_state.current_plan = plan
 
                                 if work_result.get("sub_results"):
                                     sub_results = work_result.get("sub_results", [])
@@ -455,119 +282,6 @@ def main():
                                                 total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
                                                 st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
 
-                                            st.subheader("筛选参数")
-                                            filter_params = {}
-
-                                            if work_result.get("results"):
-                                                for step_result in work_result.get("results", []):
-                                                    if step_result.get("success"):
-                                                        tool_name = step_result.get("tool", "")
-                                                        step_params = step_result.get("params", {})
-
-                                                    if tool_name == "buffer_filter_tool":
-                                                        buffer_dist = step_params.get("buffer_distance")
-                                                        if buffer_dist is not None:
-                                                            filter_params["缓冲区距离"] = f"{buffer_dist} 米"
-                                                    elif tool_name == "elevation_filter_tool":
-                                                        min_elev = step_params.get("min_elev")
-                                                        max_elev = step_params.get("max_elev")
-                                                        if min_elev is not None or max_elev is not None:
-                                                            elev_str = ""
-                                                            if min_elev is not None:
-                                                                elev_str += f"{min_elev} 米"
-                                                            if max_elev is not None:
-                                                                if elev_str:
-                                                                    elev_str += " - "
-                                                                elev_str += f"{max_elev} 米"
-                                                            filter_params["高程范围"] = elev_str
-                                                    elif tool_name == "slope_filter_tool":
-                                                        min_slope = step_params.get("min_slope")
-                                                        max_slope = step_params.get("max_slope")
-                                                        if min_slope is not None or max_slope is not None:
-                                                            slope_str = ""
-                                                            if min_slope is not None:
-                                                                slope_str += f"{min_slope}°"
-                                                            if max_slope is not None:
-                                                                if slope_str:
-                                                                    slope_str += " - "
-                                                                slope_str += f"{max_slope}°"
-                                                            filter_params["坡度范围"] = slope_str
-                                                    elif tool_name == "vegetation_filter_tool":
-                                                        veg_types = step_params.get("vegetation_types", [])
-                                                        exclude_types = step_params.get("exclude_types", [])
-                                                        if veg_types:
-                                                            veg_names = {
-                                                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                            }
-                                                            veg_list = [veg_names.get(v, str(v)) for v in veg_types]
-                                                            filter_params["植被类型"] = ", ".join(veg_list)
-                                                        elif exclude_types:
-                                                            veg_names = {
-                                                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                            }
-                                                            exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
-                                                            filter_params["排除植被类型"] = ", ".join(exclude_list)
-
-                                        if plan.get("steps"):
-                                            for step in plan.get("steps", []):
-                                                step_params = step.get("params", {})
-                                                if step.get("tool") == "buffer_filter_tool":
-                                                    if "buffer_distance" in step_params:
-                                                        filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
-                                                elif step.get("tool") == "elevation_filter_tool":
-                                                    min_elev = step_params.get("min_elev")
-                                                    max_elev = step_params.get("max_elev")
-                                                    if min_elev is not None or max_elev is not None:
-                                                        elev_str = ""
-                                                        if min_elev is not None:
-                                                            elev_str += f"{min_elev} 米"
-                                                        if max_elev is not None:
-                                                            if elev_str:
-                                                                elev_str += " - "
-                                                            elev_str += f"{max_elev} 米"
-                                                        filter_params["高程范围"] = elev_str
-                                                elif step.get("tool") == "slope_filter_tool":
-                                                    min_slope = step_params.get("min_slope")
-                                                    max_slope = step_params.get("max_slope")
-                                                    if min_slope is not None or max_slope is not None:
-                                                        slope_str = ""
-                                                        if min_slope is not None:
-                                                            slope_str += f"{min_slope}°"
-                                                        if max_slope is not None:
-                                                            if slope_str:
-                                                                slope_str += " - "
-                                                            slope_str += f"{max_slope}°"
-                                                        filter_params["坡度范围"] = slope_str
-                                                elif step.get("tool") == "vegetation_filter_tool":
-                                                    veg_types = step_params.get("vegetation_types", [])
-                                                    exclude_types = step_params.get("exclude_types", [])
-                                                    if veg_types:
-                                                        veg_names = {
-                                                            10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                            50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                            80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                        }
-                                                        veg_list = [veg_names.get(v, str(v)) for v in veg_types]
-                                                        filter_params["植被类型"] = ", ".join(veg_list)
-                                                    elif exclude_types:
-                                                        veg_names = {
-                                                            10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                            50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                            80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                        }
-                                                        exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
-                                                        filter_params["排除植被类型"] = ", ".join(exclude_list)
-
-                                        if filter_params:
-                                            param_cols = st.columns(len(filter_params))
-                                            for idx, (key, value) in enumerate(filter_params.items()):
-                                                with param_cols[idx]:
-                                                    st.metric(key, value)
-
                                 st.markdown("---")
 
                                 if st.button("开始新任务", type="primary"):
@@ -577,8 +291,9 @@ def main():
                                     st.rerun()
                             else:
                                 st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
-                                if st.button("返回修改计划"):
-                                    st.session_state.current_stage = "plan_review"
+                                if st.button("重新输入任务", type="primary"):
+                                    st.session_state.current_plan = None
+                                    st.session_state.current_stage = "input"
                                     st.rerun()
                         else:
                             st.error(f"API请求失败: {response.status_code}")
