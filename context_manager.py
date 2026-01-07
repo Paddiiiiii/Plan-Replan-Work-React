@@ -16,6 +16,9 @@ class ContextManager:
         self.static_context: Dict[str, str] = {}
         # 保存最近一次KAG推理的完整答案文本，用于在plan阶段展示
         self.last_kag_answer: str = ""
+        # 缓存最近一次查询的上下文，避免重复调用KAG
+        self._last_query: str = ""
+        self._last_context: List[Dict] = []
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"使用设备: {device} 进行embedding计算")
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL, device=device)
@@ -266,17 +269,23 @@ class ContextManager:
         logger.warning("KAG推理器未初始化，返回空结果")
         return []
 
-    def load_dynamic_context(self, query: str, top_k: int = None) -> List[Dict]:
+    def load_dynamic_context(self, query: str, top_k: int = None, use_cache: bool = True) -> List[Dict]:
         """
         从KAG知识图谱检索上下文
         
         Args:
             query: 查询文本
             top_k: 返回结果数量，默认使用配置值
+            use_cache: 是否使用缓存（如果查询相同，直接返回缓存结果）
             
         Returns:
             检索到的上下文列表
         """
+        # 如果使用缓存且查询相同，直接返回缓存结果
+        if use_cache and query == self._last_query and self._last_context:
+            logger.info(f"[KAG检索] 使用缓存结果，query='{query[:50]}...'")
+            return self._last_context
+        
         if top_k is None:
             top_k = KAG_CONFIG["top_k"]
 
@@ -381,6 +390,11 @@ class ContextManager:
                 "final_score": result["final_score"],
                 "low_confidence": result.get("low_confidence", False)
             })
+
+        # 保存缓存（避免重复调用KAG）
+        if use_cache:
+            self._last_query = query
+            self._last_context = contexts
 
         return contexts
     

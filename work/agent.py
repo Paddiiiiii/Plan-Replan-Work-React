@@ -148,10 +148,8 @@ class WorkAgent:
                 "params": step_params
             })
 
-        rag_context = self.context_manager.load_dynamic_context(
-            step_description,
-            top_k=3
-        )
+        # 执行阶段不再调用KAG，使用空上下文（plan阶段已经获取了所有需要的上下文）
+        rag_context = []
 
         thought = self._think(step, rag_context)
         action = self._extract_action(thought)

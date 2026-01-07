@@ -282,6 +282,125 @@ def main():
                                                 total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
                                                 st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
 
+                                            # 显示筛选参数
+                                            st.subheader("筛选参数")
+                                            filter_params = {}
+                                            
+                                            # 从执行结果中提取筛选参数
+                                            if work_result.get("results"):
+                                                for step_result in work_result.get("results", []):
+                                                    if step_result.get("success"):
+                                                        tool_name = step_result.get("tool", "")
+                                                        step_params = step_result.get("params", {})
+                                                        
+                                                        if tool_name == "buffer_filter_tool":
+                                                            buffer_dist = step_params.get("buffer_distance")
+                                                            if buffer_dist is not None:
+                                                                filter_params["缓冲区距离"] = f"{buffer_dist} 米"
+                                                        elif tool_name == "elevation_filter_tool":
+                                                            min_elev = step_params.get("min_elev")
+                                                            max_elev = step_params.get("max_elev")
+                                                            if min_elev is not None or max_elev is not None:
+                                                                elev_str = ""
+                                                                if min_elev is not None:
+                                                                    elev_str += f"{min_elev} 米"
+                                                                if max_elev is not None:
+                                                                    if elev_str:
+                                                                        elev_str += " - "
+                                                                    elev_str += f"{max_elev} 米"
+                                                                filter_params["高程范围"] = elev_str
+                                                        elif tool_name == "slope_filter_tool":
+                                                            min_slope = step_params.get("min_slope")
+                                                            max_slope = step_params.get("max_slope")
+                                                            if min_slope is not None or max_slope is not None:
+                                                                slope_str = ""
+                                                                if min_slope is not None:
+                                                                    slope_str += f"{min_slope}°"
+                                                                if max_slope is not None:
+                                                                    if slope_str:
+                                                                        slope_str += " - "
+                                                                    slope_str += f"{max_slope}°"
+                                                                filter_params["坡度范围"] = slope_str
+                                                        elif tool_name == "vegetation_filter_tool":
+                                                            veg_types = step_params.get("vegetation_types", [])
+                                                            exclude_types = step_params.get("exclude_types", [])
+                                                            if veg_types:
+                                                                veg_names = {
+                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                }
+                                                                veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                                filter_params["植被类型"] = ", ".join(veg_list)
+                                                            elif exclude_types:
+                                                                veg_names = {
+                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                }
+                                                                exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                                filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                            
+                                            # 如果执行结果中没有参数，尝试从plan中提取
+                                            if not filter_params and plan:
+                                                if plan.get("steps"):
+                                                    for step in plan.get("steps", []):
+                                                        step_params = step.get("params", {})
+                                                        if step.get("tool") == "buffer_filter_tool":
+                                                            if "buffer_distance" in step_params:
+                                                                filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
+                                                        elif step.get("tool") == "elevation_filter_tool":
+                                                            min_elev = step_params.get("min_elev")
+                                                            max_elev = step_params.get("max_elev")
+                                                            if min_elev is not None or max_elev is not None:
+                                                                elev_str = ""
+                                                                if min_elev is not None:
+                                                                    elev_str += f"{min_elev} 米"
+                                                                if max_elev is not None:
+                                                                    if elev_str:
+                                                                        elev_str += " - "
+                                                                    elev_str += f"{max_elev} 米"
+                                                                filter_params["高程范围"] = elev_str
+                                                        elif step.get("tool") == "slope_filter_tool":
+                                                            min_slope = step_params.get("min_slope")
+                                                            max_slope = step_params.get("max_slope")
+                                                            if min_slope is not None or max_slope is not None:
+                                                                slope_str = ""
+                                                                if min_slope is not None:
+                                                                    slope_str += f"{min_slope}°"
+                                                                if max_slope is not None:
+                                                                    if slope_str:
+                                                                        slope_str += " - "
+                                                                    slope_str += f"{max_slope}°"
+                                                                filter_params["坡度范围"] = slope_str
+                                                        elif step.get("tool") == "vegetation_filter_tool":
+                                                            veg_types = step_params.get("vegetation_types", [])
+                                                            exclude_types = step_params.get("exclude_types", [])
+                                                            if veg_types:
+                                                                veg_names = {
+                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                }
+                                                                veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                                filter_params["植被类型"] = ", ".join(veg_list)
+                                                            elif exclude_types:
+                                                                veg_names = {
+                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                }
+                                                                exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                                filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                            
+                                            if filter_params:
+                                                param_cols = st.columns(len(filter_params))
+                                                for idx, (key, value) in enumerate(filter_params.items()):
+                                                    with param_cols[idx]:
+                                                        st.metric(key, value)
+                                            else:
+                                                st.info("无筛选参数信息")
+
                                 st.markdown("---")
 
                                 if st.button("开始新任务", type="primary"):
@@ -397,11 +516,13 @@ def main():
     with tab3:
         st.header("实体-关系图")
 
-        # 初始化session state
+        # 初始化session state（只在首次访问时初始化）
         if "kg_data" not in st.session_state:
             st.session_state.kg_data = None
         if "kg_should_load" not in st.session_state:
-            st.session_state.kg_should_load = True
+            st.session_state.kg_should_load = False  # 默认不加载，只有用户点击时才加载
+        if "kg_loaded" not in st.session_state:
+            st.session_state.kg_loaded = False  # 标记是否已经加载过
         if "selected_entity_types" not in st.session_state:
             st.session_state.selected_entity_types = []
         if "selected_relation_types" not in st.session_state:
@@ -411,34 +532,43 @@ def main():
         if "selected_node" not in st.session_state:
             st.session_state.selected_node = None
 
-        # 控制栏
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            search_term = st.text_input(
-                "搜索实体",
-                value=st.session_state.kg_search_term,
-                placeholder="输入实体名称进行搜索...",
-                key="kg_search_input"
-            )
-            if search_term != st.session_state.kg_search_term:
-                st.session_state.kg_search_term = search_term
-                st.rerun()
-        
-        with col2:
-            if st.button("刷新数据", key="refresh_kg"):
-                st.session_state.kg_data = None
+        # 如果还没有加载过数据，显示加载按钮
+        if not st.session_state.kg_loaded and st.session_state.kg_data is None:
+            st.info("👆 点击下方按钮加载知识图谱数据")
+            if st.button("加载知识图谱数据", type="primary", key="load_kg_data"):
                 st.session_state.kg_should_load = True
-                st.rerun()
-        
-        with col3:
-            if st.button("重置筛选", key="reset_filters"):
-                st.session_state.selected_entity_types = []
-                st.session_state.selected_relation_types = []
-                st.session_state.kg_search_term = ""
+                st.session_state.kg_loaded = True
                 st.rerun()
 
-        # 加载数据
-        if st.session_state.kg_should_load or st.session_state.kg_data is None:
+        # 控制栏（只在已加载数据时显示）
+        if st.session_state.kg_loaded or st.session_state.kg_data is not None:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                search_term = st.text_input(
+                    "搜索实体",
+                    value=st.session_state.kg_search_term,
+                    placeholder="输入实体名称进行搜索...",
+                    key="kg_search_input"
+                )
+                if search_term != st.session_state.kg_search_term:
+                    st.session_state.kg_search_term = search_term
+                    st.rerun()
+            
+            with col2:
+                if st.button("刷新数据", key="refresh_kg"):
+                    st.session_state.kg_data = None
+                    st.session_state.kg_should_load = True
+                    st.rerun()
+            
+            with col3:
+                if st.button("重置筛选", key="reset_filters"):
+                    st.session_state.selected_entity_types = []
+                    st.session_state.selected_relation_types = []
+                    st.session_state.kg_search_term = ""
+                    st.rerun()
+
+        # 加载数据（只在kg_should_load为True时加载）
+        if st.session_state.kg_should_load:
             with st.spinner("正在从checkpoint加载知识图谱数据..."):
                 try:
                     response = requests.get(
@@ -451,13 +581,17 @@ def main():
                             st.session_state.kg_data = result
                             st.session_state.kg_should_load = False
                             st.success("数据加载成功！")
+                            st.rerun()
                         else:
                             st.error("获取知识图谱数据失败")
+                            st.session_state.kg_should_load = False
                     else:
                         st.error(f"API请求失败: {response.status_code}")
+                        st.session_state.kg_should_load = False
                 except requests.exceptions.RequestException as e:
                     st.error(f"连接API失败: {e}")
                     st.info("请确保后端服务已启动（运行 main.py）")
+                    st.session_state.kg_should_load = False
 
         # 显示统计信息
         if st.session_state.kg_data:

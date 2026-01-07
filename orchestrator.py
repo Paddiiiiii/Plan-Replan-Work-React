@@ -61,21 +61,22 @@ class Orchestrator:
                     f"成功: {sub_result.get('success', False)}"
                 )
         
-        max_iterations = 3
-        iteration = 0
-        
-        while not work_result.get("success", False) and iteration < max_iterations:
-            if self.replan_module.should_replan(work_result):
-                available_tools = list(self.work_agent.tools.keys())
-                plan = self.replan_module.replan(plan, work_result, available_tools)
-                work_result = self.work_agent.execute_plan(plan)
-            iteration += 1
+        # 暂时搁置自动replan功能（保留代码但不使用）
+        # max_iterations = 3
+        # iteration = 0
+        # 
+        # while not work_result.get("success", False) and iteration < max_iterations:
+        #     if self.replan_module.should_replan(work_result):
+        #         available_tools = list(self.work_agent.tools.keys())
+        #         plan = self.replan_module.replan(plan, work_result, available_tools)
+        #         work_result = self.work_agent.execute_plan(plan)
+        #     iteration += 1
         
         return {
             "success": work_result.get("success", False),
             "plan": plan,
             "result": work_result,
-            "iterations": iteration + 1
+            "iterations": 1  # 不再重试，只执行一次
         }
     
     def _plan_phase(self, user_task: str) -> Dict:
