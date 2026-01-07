@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 class ContextManager:
     def __init__(self):
         self.static_context: Dict[str, str] = {}
+        # 保存最近一次KAG推理的完整答案文本，用于在plan阶段展示
+        self.last_kag_answer: str = ""
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"使用设备: {device} 进行embedding计算")
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL, device=device)
@@ -199,6 +201,11 @@ class ContextManager:
         if self.kag_solver:
             try:
                 result = self.kag_solver.query(query)
+                # 记录本次KAG推理的完整答案，供plan阶段展示使用（避免重复调用KAG）
+                try:
+                    self.last_kag_answer = result.get("answer") or result.get("raw_result") or ""
+                except Exception:
+                    self.last_kag_answer = ""
                 # 将KAG推理结果转换为检索格式
                 candidates = []
                 

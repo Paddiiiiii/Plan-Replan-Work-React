@@ -50,7 +50,11 @@ class ReplanModule:
         ]
 
         response = call_llm(messages)
+        logger.info(f"LLM响应长度: {len(response)}")
         new_plan = parse_plan_response(response)
+        
+        # 保存LLM响应，供前端展示
+        new_plan["llm_response"] = response
 
         return new_plan
 
@@ -93,6 +97,9 @@ class ReplanModule:
 
             if "steps" not in new_plan:
                 new_plan["steps"] = []
+            
+            # 保存LLM响应，供前端展示
+            new_plan["llm_response"] = response
 
             logger.info(f"重新规划成功，新计划包含 {len(new_plan.get('steps', []))} 个步骤")
             return new_plan

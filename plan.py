@@ -62,35 +62,39 @@ class PlanModule:
                     "metadata": ctx.get("metadata", {})
                 })
 
-        # 获取KAG推理的最终答案
+        # 使用第一次KAG检索时缓存的答案，避免在plan阶段再次触发KAG推理
         try:
-            kag_result = self.context_manager.query_with_kag_reasoning(user_task)
-            if kag_result and kag_result.get("answer"):
-                answer = kag_result.get("answer", "")
+            answer = getattr(self.context_manager, "last_kag_answer", "") or ""
+            if answer:
                 # 提取"Final Answer:"后面的内容
                 # 支持多种可能的格式：Final Answer:、Final Answer:、Final Answer等
                 final_answer_match = re.search(
-                    r'Final\s+Answer\s*:?\s*(.*)',
+                    r"Final\s+Answer\s*:?\\s*(.*)",
                     answer,
-                    re.IGNORECASE | re.DOTALL
+                    re.IGNORECASE | re.DOTALL,
                 )
                 if final_answer_match:
                     kag_answer = final_answer_match.group(1).strip()
                     # 清理reference标记
-                    kag_answer = re.sub(r'<reference[^>]*></reference>', '', kag_answer)
+                    kag_answer = re.sub(r"<reference[^>]*></reference>", "", kag_answer)
                     kag_answer = kag_answer.strip()
                     if kag_answer:
                         plan["kag_reasoning_answer"] = kag_answer
-                        logger.info(f"Plan阶段 - KAG推理答案已提取，长度: {len(kag_answer)}")
+                        logger.info(
+                            f"Plan阶段 - KAG推理答案已提取（使用缓存），长度: {len(kag_answer)}"
+                        )
                 else:
                     # 如果没有"Final Answer:"标记，直接使用整个答案（清理reference标记）
-                    clean_answer = re.sub(r'<reference[^>]*></reference>', '', answer)
-                    clean_answer = clean_answer.strip()
+                    clean_answer = re.sub(
+                        r"<reference[^>]*></reference>", "", answer
+                    ).strip()
                     if clean_answer:
                         plan["kag_reasoning_answer"] = clean_answer
-                        logger.info(f"Plan阶段 - KAG推理答案已提取（无标记），长度: {len(clean_answer)}")
+                        logger.info(
+                            f"Plan阶段 - KAG推理答案已提取（缓存，无标记），长度: {len(clean_answer)}"
+                        )
         except Exception as e:
-            logger.warning(f"Plan阶段 - 获取KAG推理答案失败: {e}")
+            logger.warning(f"Plan阶段 - 处理KAG推理答案缓存失败: {e}")
 
         return plan
 

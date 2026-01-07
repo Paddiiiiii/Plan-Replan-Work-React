@@ -26,7 +26,7 @@ except Exception:
     pass
 
 API_URL = "http://localhost:8000"
-API_TIMEOUT = 240
+API_TIMEOUT = 480
 
 def load_geojson(file_path: str):
     try:
@@ -242,6 +242,9 @@ def main():
                     st.markdown("### LLM完整思考过程")
                     with st.expander("查看完整思考过程", expanded=False):
                         llm_response = plan.get('llm_response', '')
+                        # 确保llm_response是字符串类型
+                        if not isinstance(llm_response, str):
+                            llm_response = str(llm_response) if llm_response else ''
                         thinking_part = llm_response
 
                         import re
