@@ -209,7 +209,7 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "我方现在正在进攻，坦克部署在118.786310,32.027770位置，战场正方向为110°（正北方向为0°），筛选出步兵的部署位置"
+            st.session_state.task_input = "我方现在正在进攻，步兵部署在118.786310,32.027770位置，战场正方向为110°（正北方向为0°），筛选出坦克的部署位置"
 
         if st.session_state.current_stage == "input":
             st.subheader("输入任务")
@@ -224,10 +224,6 @@ def main():
                 st.session_state.task_input = task_input
                 st.session_state.current_stage = "executing"
                 st.rerun()
-
-        # 暂时搁置计划审查阶段（保留代码但不使用）
-        # elif st.session_state.current_stage == "plan_review":
-        #     ... (计划审查相关代码已注释，保留以备将来使用)
 
         elif st.session_state.current_stage == "executing":
             st.subheader("执行任务")

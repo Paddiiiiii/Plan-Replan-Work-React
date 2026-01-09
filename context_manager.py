@@ -86,7 +86,7 @@ class ContextManager:
         else:
             raise FileNotFoundError(
                 f"提示词文件不存在: {static_file}\n"
-                "请创建 context/static/prompts.json 文件，包含 plan_prompt, replan_prompt, work_prompt, system_prompt 字段"
+                "请创建 context/static/prompts.json 文件，包含 plan_prompt, work_first_think_prompt, work_second_think_prompt, work_prompt, system_prompt 字段"
             )
         
         logger.info("静态上下文已加载")

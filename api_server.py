@@ -69,10 +69,6 @@ class TaskRequest(BaseModel):
 class PlanRequest(BaseModel):
     task: str = Field(..., description="任务描述")
 
-class ReplanRequest(BaseModel):
-    plan: Dict[str, Any] = Field(..., description="原计划")
-    feedback: str = Field(..., description="用户反馈意见")
-
 class ExecuteRequest(BaseModel):
     plan: Dict[str, Any] = Field(..., description="执行计划")
 
@@ -97,7 +93,6 @@ async def root():
         "main_endpoints": {
             "智能体任务": {
                 "/api/plan": "POST - 生成执行计划",
-                "/api/replan": "POST - 根据反馈重新规划",
                 "/api/execute": "POST - 执行计划",
                 "/api/task": "POST - 完整流程（规划+执行）"
             },
@@ -144,47 +139,6 @@ async def generate_plan(request: PlanRequest):
             error_msg = error_msg[:500] + "..."
 
         raise HTTPException(status_code=500, detail=f"生成计划时出错: {error_msg}")
-
-@app.post("/api/replan", response_model=TaskResponse, tags=["智能体任务"])
-async def replan_with_feedback(request: ReplanRequest):
-    """
-    根据反馈重新规划
-    
-    根据用户反馈或执行失败情况，重新生成执行计划。
-    系统会分析反馈内容，调整计划步骤和参数。
-    """
-    try:
-        import traceback
-        import logging
-        logger = logging.getLogger(__name__)
-
-        logger.info(f"收到重新规划请求，反馈: {request.feedback[:100]}")
-
-        result = get_orchestrator().replan_with_feedback(request.plan, request.feedback)
-
-        logger.info("重新规划成功")
-        return TaskResponse(
-            success=result.get("success", False),
-            result=result,
-            message="重新规划完成"
-        )
-    except Exception as e:
-        import traceback
-        import logging
-        logger = logging.getLogger(__name__)
-
-        error_detail = traceback.format_exc()
-        logger.error(f"重新规划错误: {str(e)}")
-        logger.error(error_detail)
-
-        error_msg = str(e)
-        if len(error_msg) > 500:
-            error_msg = error_msg[:500] + "..."
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"重新规划时出错: {error_msg}"
-        )
 
 @app.post("/api/execute", response_model=TaskResponse, tags=["智能体任务"])
 async def execute_plan(request: ExecuteRequest):
