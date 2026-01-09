@@ -1,6 +1,6 @@
 from typing import Dict, List
 from context_manager import ContextManager
-from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool, RelativePositionFilterTool
 from utils.llm_utils import call_llm, parse_plan_response
 from utils.tool_utils import get_tools_schema_text
 import json
@@ -15,7 +15,8 @@ class ReplanModule:
             "buffer_filter_tool": BufferFilterTool(),
             "elevation_filter_tool": ElevationFilterTool(),
             "slope_filter_tool": SlopeFilterTool(),
-            "vegetation_filter_tool": VegetationFilterTool()
+            "vegetation_filter_tool": VegetationFilterTool(),
+            "relative_position_filter_tool": RelativePositionFilterTool()
         }
 
     def should_replan(self, work_result: Dict) -> bool:

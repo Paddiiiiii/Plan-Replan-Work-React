@@ -39,6 +39,17 @@ MilitaryUnit(军事单位): EntityType
         equippedWith(装备): Weapon
         belongsTo(属于): UnitOrganization
         executes(执行): CombatTask
+        deployedInForm(部署在战术形式): CombatForm
+            properties:
+                positionType(位置类型): Text
+                    index: Text
+        positionedRelativeTo(相对位置): RelativePosition
+            properties:
+                relativeUnit(相对单位): Text
+                    index: Text
+                description(描述): Text
+                    index: Text
+        partOfFormation(所属队形): Formation
 
 # 地形特征
 TerrainFeature(地形特征): EntityType
@@ -356,3 +367,78 @@ CommandPost(指挥所): EntityType
         inArea(所在地域): DefenseArea
         commands(指挥): UnitOrganization
         protectedBy(受保护): MilitaryUnit
+
+# 战术形式（进攻、防御、转移）
+CombatForm(战术形式): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        formType(形式类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        objective(目标): Text
+            index: TextAndVector
+        characteristics(特点): Text
+            index: TextAndVector
+    relations:
+        containsUnit(包含单位): MilitaryUnit
+        requiresFormation(需要队形): Formation
+        hasDeploymentPattern(部署模式): DeploymentPattern
+
+# 相对位置（最前方、前方、后方、侧翼等）
+RelativePosition(相对位置): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        positionType(位置类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        angleRange(角度范围): Text
+            index: Text
+        characteristics(特点): Text
+            index: TextAndVector
+    relations:
+        relativeTo(相对于): MilitaryUnit
+        partOfFormation(所属队形): Formation
+        usedInPattern(用于部署模式): DeploymentPattern
+
+# 部署模式（描述兵种在特定战术形式下的部署位置）
+DeploymentPattern(部署模式): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        purpose(目的): Text
+            index: TextAndVector
+        principle(原则): Text
+            index: TextAndVector
+    relations:
+        appliesToUnit(适用于单位): MilitaryUnit
+        inCombatForm(战术形式): CombatForm
+        atRelativePosition(相对位置): RelativePosition
+        relativeToUnit(相对单位): MilitaryUnit
+        requiresFormation(需要队形): Formation
+
+# 队形（整个队形、防线等）
+Formation(队形): EntityType
+    properties:
+        name(名称): Text
+            index: Text
+        formationType(队形类型): Text
+            index: Text
+        desc(描述): Text
+            index: TextAndVector
+        frontage(正面宽度): Text
+            index: Text
+        depth(纵深): Text
+            index: Text
+        purpose(目的): Text
+            index: TextAndVector
+    relations:
+        containsUnit(包含单位): MilitaryUnit
+        usesForm(使用战术形式): CombatForm
+        hasRelativePositions(相对位置): RelativePosition
+        organizedIn(组织在): UnitOrganization

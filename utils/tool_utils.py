@@ -42,7 +42,7 @@ def prepare_step_input_path(
         return
     
     if chainable_types is None:
-        chainable_types = ["elevation", "slope", "vegetation"]
+        chainable_types = ["elevation", "slope", "vegetation", "relative_position"]
     
     # 确保params存在
     if "params" not in step:

@@ -174,4 +174,8 @@ class KAGStaticPipeline(SolverPipelineABC):
             print(
                 f"{green}Input Query: {query}\n\nTasks:\n\n{task_info}\n\nFinal Answer: {answer}\nGold Answer: {kwargs.get('gold')}{reset}"
             )
+            # 保存context到pipeline对象，以便wrapper访问
+            self._last_context = context
+            self._last_query = query
+            self._last_tasks = task_info
             return answer

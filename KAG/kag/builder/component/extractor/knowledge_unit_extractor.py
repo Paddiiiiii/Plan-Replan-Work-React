@@ -142,6 +142,15 @@ class KnowledgeUnitSchemaFreeExtractor(ExtractorABC):
             "Minefield": "Minefield",
             "指挥所": "CommandPost",
             "CommandPost": "CommandPost",
+            # 新增的相对位置相关类型映射
+            "战术形式": "CombatForm",
+            "CombatForm": "CombatForm",
+            "相对位置": "RelativePosition",
+            "RelativePosition": "RelativePosition",
+            "队形": "Formation",
+            "Formation": "Formation",
+            "部署模式": "DeploymentPattern",
+            "DeploymentPattern": "DeploymentPattern",
         }
 
     def get_stand_schema(self, type_name):

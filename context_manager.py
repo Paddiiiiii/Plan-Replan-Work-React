@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 class ContextManager:
     def __init__(self):
         self.static_context: Dict[str, str] = {}
-        # 保存最近一次KAG推理的完整答案文本，用于在plan阶段展示
         self.last_kag_answer: str = ""
-        # 缓存最近一次查询的上下文，避免重复调用KAG
+        self.last_kag_input_query: str = ""
+        self.last_kag_tasks: List[Dict] = []
         self._last_query: str = ""
         self._last_context: List[Dict] = []
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -42,9 +42,7 @@ class ContextManager:
             # 导入KAG项目内部的solver wrapper
             import sys
             from pathlib import Path
-            
-            # 添加KAG路径（确保kag模块可以被导入）
-            # __file__ 是 context_manager.py，parent 是 AIgen 目录
+
             base_dir = Path(__file__).parent
             kag_path = base_dir / "KAG"
             kag_path_str = str(kag_path.resolve())  # 使用绝对路径
@@ -204,11 +202,15 @@ class ContextManager:
         if self.kag_solver:
             try:
                 result = self.kag_solver.query(query)
-                # 记录本次KAG推理的完整答案，供plan阶段展示使用（避免重复调用KAG）
+                # 记录本次KAG推理的完整结果，供plan阶段使用（避免重复调用KAG）
                 try:
                     self.last_kag_answer = result.get("answer") or result.get("raw_result") or ""
+                    self.last_kag_input_query = result.get("input_query", query)
+                    self.last_kag_tasks = result.get("tasks", [])
                 except Exception:
                     self.last_kag_answer = ""
+                    self.last_kag_input_query = query
+                    self.last_kag_tasks = []
                 # 将KAG推理结果转换为检索格式
                 candidates = []
                 
@@ -222,10 +224,8 @@ class ContextManager:
                             "distance": ref.get("distance", 0.0)
                         })
                 
-                # 如果没有references但有answer，将answer作为文本上下文返回
                 if not candidates and result.get("answer"):
                     answer = result.get("answer", "")
-                    # 清理reference标记，保留纯文本
                     import re
                     clean_answer = re.sub(r'<reference[^>]*></reference>', '', answer)
                     clean_answer = clean_answer.strip()
@@ -281,6 +281,10 @@ class ContextManager:
         Returns:
             检索到的上下文列表
         """
+        # 空查询直接跳过，避免无意义的KAG调用
+        if not query or not str(query).strip():
+            logger.warning("[KAG检索] 空查询已跳过")
+            return []
         # 如果使用缓存且查询相同，直接返回缓存结果
         if use_cache and query == self._last_query and self._last_context:
             logger.info(f"[KAG检索] 使用缓存结果，query='{query[:50]}...'")

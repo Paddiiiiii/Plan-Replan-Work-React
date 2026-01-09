@@ -81,6 +81,20 @@ class KAGSolverWrapper:
                 # 从配置创建solver pipeline
                 self._solver = SolverPipelineABC.from_config(solver_config)
                 
+                # 包装ainvoke方法以捕获context和tasks
+                original_ainvoke = self._solver.ainvoke
+                
+                async def wrapped_ainvoke(query, **kwargs):
+                    # 调用原始方法
+                    answer = await original_ainvoke(query, **kwargs)
+                    # 保存context到solver对象，以便后续访问
+                    # 注意：这需要pipeline在内部保存context
+                    # 如果pipeline没有保存context，我们需要通过其他方式获取
+                    return answer
+                
+                # 暂时不替换，因为我们需要在调用时捕获context
+                # 我们将在query方法中处理
+                
                 self._initialized = True
                 logger.info("KAG推理器初始化成功")
             finally:
@@ -99,7 +113,7 @@ class KAGSolverWrapper:
             question: 用户问题
             
         Returns:
-            包含答案和引用的字典
+            包含答案、任务列表、输入查询和引用的字典
         """
         self._init_solver()
         
@@ -107,6 +121,8 @@ class KAGSolverWrapper:
             logger.warning("KAG推理器未初始化，返回空结果")
             return {
                 "answer": "",
+                "input_query": question,
+                "tasks": [],
                 "references": [],
                 "error": "KAG推理器未初始化"
             }
@@ -134,30 +150,75 @@ class KAGSolverWrapper:
                 # 没有运行的事件循环，可以使用asyncio.run()
                 result = asyncio.run(self._solver.ainvoke(question))
             
+            # 从pipeline对象获取保存的context和tasks
+            captured_tasks = []
+            if hasattr(self._solver, '_last_tasks'):
+                # _last_tasks可能包含复杂对象，需要序列化
+                raw_tasks = self._solver._last_tasks
+                for raw_task in raw_tasks:
+                    serialized_task = {}
+                    if isinstance(raw_task, dict):
+                        # 序列化task字典中的每个值
+                        for key, value in raw_task.items():
+                            serialized_task[key] = self._serialize_value(value)
+                    else:
+                        # 如果不是字典，尝试序列化整个对象
+                        serialized_task = self._serialize_value(raw_task)
+                    captured_tasks.append(serialized_task)
+            elif hasattr(self._solver, '_last_context'):
+                # 如果只有context，从context提取tasks并序列化
+                context = self._solver._last_context
+                try:
+                    for task in context.gen_task(group=False):
+                        # 序列化task.arguments，将复杂对象转换为字符串或字典
+                        task_args = {}
+                        if hasattr(task, 'arguments') and task.arguments:
+                            for key, value in task.arguments.items():
+                                task_args[key] = self._serialize_value(value)
+                        
+                        # 序列化task.result
+                        task_result = None
+                        if hasattr(task, 'result') and task.result is not None:
+                            task_result = self._serialize_value(task.result)
+                        
+                        # 序列化task.memory
+                        task_memory = {}
+                        if hasattr(task, 'memory') and task.memory:
+                            for key, value in task.memory.items():
+                                task_memory[key] = self._serialize_value(value)
+                        
+                        captured_tasks.append({
+                            "task": task_args,
+                            "memory": task_memory,
+                            "result": task_result,
+                            "executor": task.executor if hasattr(task, 'executor') else None
+                        })
+                except Exception as e:
+                    logger.debug(f"从context提取tasks失败: {e}")
+            
             # 标准化返回格式
             # KAG的返回格式通常是字符串（答案）
+            answer = ""
             if isinstance(result, str):
-                return {
-                    "answer": result,
-                    "references": [],
-                    "raw_result": result
-                }
+                answer = result
             elif isinstance(result, dict):
-                return {
-                    "answer": result.get("answer", str(result) if result else ""),
-                    "references": result.get("references", []),
-                    "raw_result": result
-                }
+                answer = result.get("answer", str(result) if result else "")
             else:
-                return {
-                    "answer": str(result) if result else "",
-                    "references": [],
-                    "raw_result": result
-                }
+                answer = str(result) if result else ""
+            
+            return {
+                "answer": answer,
+                "input_query": question,
+                "tasks": captured_tasks,
+                "references": result.get("references", []) if isinstance(result, dict) else [],
+                "raw_result": result
+            }
         except Exception as e:
             logger.error(f"KAG推理查询失败: {e}", exc_info=True)
             return {
                 "answer": "",
+                "input_query": question,
+                "tasks": [],
                 "references": [],
                 "error": str(e)
             }
@@ -696,6 +757,51 @@ class KAGSolverWrapper:
             logger.debug(f"格式化实体失败: {e}, entity类型: {type(entity)}")
         
         return None
+    
+    def _serialize_value(self, value: Any) -> Any:
+        """
+        将值序列化为可JSON序列化的格式
+        
+        Args:
+            value: 要序列化的值
+            
+        Returns:
+            可序列化的值（字符串、数字、列表、字典等）
+        """
+        if value is None:
+            return None
+        
+        # 基本类型直接返回
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        
+        # 列表和元组递归处理
+        if isinstance(value, (list, tuple)):
+            return [self._serialize_value(item) for item in value]
+        
+        # 字典递归处理
+        if isinstance(value, dict):
+            return {str(k): self._serialize_value(v) for k, v in value.items()}
+        
+        # 如果对象有to_dict方法，使用它
+        if hasattr(value, 'to_dict'):
+            try:
+                return self._serialize_value(value.to_dict())
+            except Exception:
+                pass
+        
+        # 如果对象有__dict__，转换为字典
+        if hasattr(value, '__dict__'):
+            try:
+                return self._serialize_value(value.__dict__)
+            except Exception:
+                pass
+        
+        # 最后尝试转换为字符串
+        try:
+            return str(value)
+        except Exception:
+            return None
     
     def _format_relation(self, relation: Any) -> Optional[Dict]:
         """格式化关系数据"""

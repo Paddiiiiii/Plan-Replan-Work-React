@@ -5,15 +5,148 @@ import json
 import re
 import logging
 import requests
+import time
+import threading
 from typing import Dict, List
+from collections import deque
 from config import LLM_CONFIG
 
 logger = logging.getLogger(__name__)
 
 
+class LLMRateLimiter:
+    """LLM速率限制器，支持RPM和TPM双重限制"""
+    
+    def __init__(self, rpm: int = 2000, tpm: int = 500000):
+        """
+        初始化速率限制器
+        
+        Args:
+            rpm: 每分钟最大请求数
+            tpm: 每分钟最大tokens数
+        """
+        self.rpm = rpm
+        self.tpm = tpm
+        self.lock = threading.Lock()
+        
+        # 请求时间戳队列（用于RPM限制）
+        self.request_timestamps = deque()
+        
+        # Token使用记录队列（用于TPM限制）
+        # 每个元素是 (timestamp, token_count)
+        self.token_usage_records = deque()
+        
+        # 时间窗口（60秒）
+        self.time_window = 60.0
+    
+    def acquire(self, estimated_tokens: int = 0):
+        """
+        获取许可，如果超过限制则等待
+        
+        Args:
+            estimated_tokens: 预估的token数量（用于TPM限制）
+        """
+        with self.lock:
+            now = time.time()
+            
+            # 清理过期的请求记录（RPM限制）
+            while (self.request_timestamps and 
+                   now - self.request_timestamps[0] >= self.time_window):
+                self.request_timestamps.popleft()
+            
+            # 清理过期的token使用记录（TPM限制）
+            while (self.token_usage_records and 
+                   now - self.token_usage_records[0][0] >= self.time_window):
+                self.token_usage_records.popleft()
+            
+            # 检查RPM限制
+            if len(self.request_timestamps) >= self.rpm:
+                # 需要等待直到最早的请求退出时间窗口
+                wait_time = self.request_timestamps[0] + self.time_window - now
+                if wait_time > 0:
+                    logger.debug(f"RPM限制：等待 {wait_time:.2f} 秒")
+                    time.sleep(wait_time)
+                    now = time.time()
+                    # 重新清理过期记录
+                    while (self.request_timestamps and 
+                           now - self.request_timestamps[0] >= self.time_window):
+                        self.request_timestamps.popleft()
+            
+            # 检查TPM限制
+            current_tpm = sum(record[1] for record in self.token_usage_records)
+            if current_tpm + estimated_tokens > self.tpm:
+                # 需要等待直到有足够的token配额
+                if self.token_usage_records:
+                    # 计算需要等待的时间（直到最早的token使用记录过期）
+                    wait_time = self.token_usage_records[0][0] + self.time_window - now
+                    if wait_time > 0:
+                        logger.debug(f"TPM限制：等待 {wait_time:.2f} 秒（当前使用: {current_tpm}, 需要: {estimated_tokens}）")
+                        time.sleep(wait_time)
+                        now = time.time()
+                        # 重新清理过期记录
+                        while (self.token_usage_records and 
+                               now - self.token_usage_records[0][0] >= self.time_window):
+                            self.token_usage_records.popleft()
+            
+            # 记录本次请求
+            self.request_timestamps.append(now)
+            if estimated_tokens > 0:
+                self.token_usage_records.append((now, estimated_tokens))
+    
+    def record_token_usage(self, actual_tokens: int):
+        """
+        记录实际使用的token数量（用于更精确的TPM限制）
+        
+        Args:
+            actual_tokens: 实际使用的token数量
+        """
+        with self.lock:
+            now = time.time()
+            # 如果实际token数量与预估不同，更新最后一条记录
+            if self.token_usage_records:
+                last_record = self.token_usage_records[-1]
+                # 如果最后一条记录是最近1秒内的，更新它
+                if now - last_record[0] < 1.0:
+                    self.token_usage_records[-1] = (last_record[0], actual_tokens)
+                else:
+                    # 否则添加新记录
+                    self.token_usage_records.append((now, actual_tokens))
+            else:
+                self.token_usage_records.append((now, actual_tokens))
+
+
+# 创建全局速率限制器实例
+_rate_limit_config = LLM_CONFIG.get("rate_limit", {})
+_llm_rate_limiter = LLMRateLimiter(
+    rpm=_rate_limit_config.get("rpm", 2000),
+    tpm=_rate_limit_config.get("tpm", 500000)
+)
+
+
+def _estimate_tokens(messages: List[Dict]) -> int:
+    """
+    估算消息的token数量（简单估算：1 token ≈ 4 字符）
+    
+    Args:
+        messages: 消息列表
+        
+    Returns:
+        估算的token数量
+    """
+    total_chars = 0
+    for msg in messages:
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                total_chars += len(content)
+    # 简单估算：1 token ≈ 4 字符，加上一些开销
+    estimated_tokens = int(total_chars / 4) + 100
+    return estimated_tokens
+
+
 def call_llm(messages: List[Dict], timeout: int = None) -> str:
     """
-    调用LLM API
+    调用LLM API（带速率限制）
     
     Args:
         messages: 消息列表
@@ -29,10 +162,19 @@ def call_llm(messages: List[Dict], timeout: int = None) -> str:
     if timeout is None:
         timeout = LLM_CONFIG.get("timeout", 120)
     
+    # 估算token数量
+    estimated_tokens = _estimate_tokens(messages)
+    
+    # 应用速率限制
+    _llm_rate_limiter.acquire(estimated_tokens)
+    
     payload = {
         **LLM_CONFIG,
         "messages": messages
     }
+    
+    # 移除rate_limit配置，避免发送到API
+    payload.pop("rate_limit", None)
     
     try:
         response = requests.post(
@@ -46,7 +188,16 @@ def call_llm(messages: List[Dict], timeout: int = None) -> str:
         if "choices" not in result or len(result["choices"]) == 0:
             raise ValueError("LLM响应格式错误：缺少choices字段")
         
-        return result["choices"][0]["message"]["content"]
+        response_content = result["choices"][0]["message"]["content"]
+        
+        # 尝试获取实际使用的token数量（如果API返回了usage信息）
+        if "usage" in result:
+            usage = result["usage"]
+            actual_tokens = usage.get("total_tokens", 0)
+            if actual_tokens > 0:
+                _llm_rate_limiter.record_token_usage(actual_tokens)
+        
+        return response_content
     except requests.exceptions.RequestException as e:
         raise Exception(f"LLM API调用失败: {str(e)}")
     except (KeyError, IndexError) as e:
@@ -86,7 +237,7 @@ def parse_plan_response(response: str) -> Dict:
             return _normalize_plan(plan, response, json_block_match.start())
         except json.JSONDecodeError as e:
             logger.error(f"解析JSON代码块失败: {e}")
-            logger.error(f"JSON字符串前500字符: {json_str[:500]}")
+            logger.error(f"JSON字符串前1000字符: {json_str[:1000]}")
             # 尝试更激进的清理
             try:
                 # 移除所有注释和尾随逗号后重试
@@ -124,13 +275,19 @@ def parse_plan_response(response: str) -> Dict:
             return _normalize_plan(plan, response, json_match.start())
         except json.JSONDecodeError as e:
             logger.error(f"解析JSON对象失败: {e}")
-            logger.error(f"JSON字符串前500字符: {json_str[:500]}")
+            logger.error(f"JSON字符串前1000字符: {json_str[:1000]}")
         except Exception as e:
             logger.error(f"解析JSON对象时发生其他错误: {e}", exc_info=True)
     
-    # 如果无法解析，记录错误并返回默认结构
-    logger.warning(f"无法解析LLM响应中的JSON，使用回退计划。响应前500字符: {response[:500]}")
-    return _create_fallback_plan(response)
+    # 如果无法解析，返回空结构并记录错误
+    logger.error(f"无法解析LLM响应中的JSON。响应前1000字符: {response[:1000]}")
+    return {
+        "task": "",
+        "goal": "无法解析LLM响应",
+        "steps": [],
+        "estimated_steps": 0,
+        "error": "无法解析LLM响应中的JSON格式，请检查prompt和LLM输出"
+    }
 
 
 def _normalize_plan(plan: Dict, response: str, json_start_pos: int) -> Dict:
@@ -163,128 +320,4 @@ def _normalize_plan(plan: Dict, response: str, json_start_pos: int) -> Dict:
         plan["goal"] = thinking_part
     
     return plan
-
-
-def _create_fallback_plan(response: str) -> Dict:
-    """创建回退计划（基于关键词匹配）"""
-    # 检查是否是多任务模式（包含多个单位）
-    multi_unit_keywords = ["无人机", "坦克", "步兵", "多个", "分别", "各自", "sub_plans", "子计划"]
-    is_multi_task = any(keyword in response for keyword in multi_unit_keywords)
-    
-    if is_multi_task:
-        # 尝试从响应中提取单位信息
-        units = []
-        if "无人机" in response:
-            units.append("无人机")
-        if "坦克" in response:
-            units.append("坦克")
-        if "步兵" in response:
-            units.append("步兵")
-        
-        # 如果没有找到具体单位，使用默认单位
-        if not units:
-            units = ["单位1", "单位2", "单位3"]
-        
-        # 为每个单位创建子计划
-        sub_plans = []
-        for unit in units:
-            steps = []
-            if "缓冲区" in response or "距离" in response:
-                steps.append({
-                    "step_id": 1, 
-                    "description": "根据建筑和道路距离筛选空地", 
-                    "type": "buffer", 
-                    "tool": "buffer_filter_tool",
-                    "params": {}
-                })
-            if "高程" in response or "海拔" in response:
-                steps.append({
-                    "step_id": len(steps) + 1, 
-                    "description": "根据高程范围筛选", 
-                    "type": "elevation", 
-                    "tool": "elevation_filter_tool",
-                    "params": {}
-                })
-            if "坡度" in response or "倾斜" in response:
-                steps.append({
-                    "step_id": len(steps) + 1, 
-                    "description": "根据坡度范围筛选", 
-                    "type": "slope", 
-                    "tool": "slope_filter_tool",
-                    "params": {}
-                })
-            
-            # 植被类型关键词
-            vegetation_keywords = [
-                "植被", "草地", "林地", "树木", "耕地", "裸地", "水体", 
-                "湿地", "苔原", "稀疏植被", "永久性水体", "雪和冰"
-            ]
-            if any(keyword in response for keyword in vegetation_keywords):
-                steps.append({
-                    "step_id": len(steps) + 1, 
-                    "description": "根据植被类型筛选", 
-                    "type": "vegetation", 
-                    "tool": "vegetation_filter_tool",
-                    "params": {}
-                })
-            
-            sub_plans.append({
-                "unit": unit,
-                "steps": steps
-            })
-        
-        return {
-            "task": "",
-            "goal": response,
-            "sub_plans": sub_plans
-        }
-    else:
-        # 单任务模式
-        steps = []
-        
-        if "缓冲区" in response or "距离" in response:
-            steps.append({
-                "step_id": 1, 
-                "description": "根据建筑和道路距离筛选空地", 
-                "type": "buffer", 
-                "tool": "buffer_filter_tool",
-                "params": {}
-            })
-        if "高程" in response or "海拔" in response:
-            steps.append({
-                "step_id": len(steps) + 1, 
-                "description": "根据高程范围筛选", 
-                "type": "elevation", 
-                "tool": "elevation_filter_tool",
-                "params": {}
-            })
-        if "坡度" in response or "倾斜" in response:
-            steps.append({
-                "step_id": len(steps) + 1, 
-                "description": "根据坡度范围筛选", 
-                "type": "slope", 
-                "tool": "slope_filter_tool",
-                "params": {}
-            })
-        
-        # 植被类型关键词
-        vegetation_keywords = [
-            "植被", "草地", "林地", "树木", "耕地", "裸地", "水体", 
-            "湿地", "苔原", "稀疏植被", "永久性水体", "雪和冰"
-        ]
-        if any(keyword in response for keyword in vegetation_keywords):
-            steps.append({
-                "step_id": len(steps) + 1, 
-                "description": "根据植被类型筛选", 
-                "type": "vegetation", 
-                "tool": "vegetation_filter_tool",
-                "params": {}
-            })
-        
-        return {
-            "task": "",
-            "goal": response,
-            "steps": steps,
-            "estimated_steps": len(steps)
-        }
 

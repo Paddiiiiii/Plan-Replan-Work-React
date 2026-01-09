@@ -126,6 +126,19 @@ def _display_result(sub_result: Dict, plan: Dict):
                     }
                     exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
                     filter_params["排除植被类型"] = ", ".join(exclude_list)
+            elif tool_name == "relative_position_filter_tool":
+                reference_point = step_params.get("reference_point", {})
+                reference_direction = step_params.get("reference_direction")
+                position_types = step_params.get("position_types", [])
+                if reference_point:
+                    lon = reference_point.get("lon")
+                    lat = reference_point.get("lat")
+                    if lon is not None and lat is not None:
+                        filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                if reference_direction is not None:
+                    filter_params["参考方向"] = f"{reference_direction}°"
+                if position_types:
+                    filter_params["相对位置类型"] = ", ".join(position_types)
     
     if filter_params:
         for key, value in filter_params.items():
@@ -196,7 +209,7 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "帮我找找无人机可以部署在哪里、坦克可以部署在哪里、步兵可以部署在哪里"
+            st.session_state.task_input = "我方现在正在进攻，坦克部署在118.786310,32.027770位置，战场正方向为110°（正北方向为0°），筛选出步兵的部署位置"
 
         if st.session_state.current_stage == "input":
             st.subheader("输入任务")
@@ -340,6 +353,19 @@ def main():
                                                                 }
                                                                 exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
                                                                 filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                                        elif tool_name == "relative_position_filter_tool":
+                                                            reference_point = step_params.get("reference_point", {})
+                                                            reference_direction = step_params.get("reference_direction")
+                                                            position_types = step_params.get("position_types", [])
+                                                            if reference_point:
+                                                                lon = reference_point.get("lon")
+                                                                lat = reference_point.get("lat")
+                                                                if lon is not None and lat is not None:
+                                                                    filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                                                            if reference_direction is not None:
+                                                                filter_params["参考方向"] = f"{reference_direction}°"
+                                                            if position_types:
+                                                                filter_params["相对位置类型"] = ", ".join(position_types)
                                             
                                             # 如果执行结果中没有参数，尝试从plan中提取
                                             if not filter_params and plan:
@@ -392,6 +418,19 @@ def main():
                                                                 }
                                                                 exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
                                                                 filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                                        elif step.get("type") == "relative_position" or step.get("tool") == "relative_position_filter_tool":
+                                                            reference_point = step_params.get("reference_point", {})
+                                                            reference_direction = step_params.get("reference_direction")
+                                                            position_types = step_params.get("position_types", [])
+                                                            if reference_point:
+                                                                lon = reference_point.get("lon")
+                                                                lat = reference_point.get("lat")
+                                                                if lon is not None and lat is not None:
+                                                                    filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                                                            if reference_direction is not None:
+                                                                filter_params["参考方向"] = f"{reference_direction}°"
+                                                            if position_types:
+                                                                filter_params["相对位置类型"] = ", ".join(position_types)
                                             
                                             if filter_params:
                                                 param_cols = st.columns(len(filter_params))

@@ -11,7 +11,11 @@ LLM_CONFIG = {
     "top_p": 1.0,
     "n": 1,
     "stream": False,
-    "timeout": 800
+    "timeout": 800,
+    "rate_limit": {
+        "rpm": 2000,  # 每分钟最大请求数
+        "tpm": 500000  # 每分钟最大tokens数
+    }
 }
 
 PATHS = {

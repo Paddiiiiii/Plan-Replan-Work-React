@@ -19,9 +19,10 @@ class BufferFilterTool(BaseTool):
     def __init__(self):
         super().__init__(
             name="buffer_filter_tool",
-            description="根据建筑和道路创建缓冲区，筛选出远离建筑和道路的空地区域"
+            description="根据建筑和道路缓冲区筛选GeoJSON区域，排除距离建筑和道路过近的区域"
         )
         self.parameters = {
+            "input_geojson_path": {"type": "string", "description": "输入GeoJSON文件路径"},
             "buffer_distance": {"type": "number", "description": "缓冲区距离（米）"},
             "utm_crs": {"type": "string", "description": "UTM坐标系统（可选）"}
         }
@@ -131,43 +132,52 @@ class BufferFilterTool(BaseTool):
         return union
     
     def execute(self, **kwargs) -> Dict[str, Any]:
+        input_path = kwargs.get("input_geojson_path")
         buffer_distance = kwargs.get("buffer_distance", 500.0)
         utm_crs = kwargs.get("utm_crs")
+        
+        # 参数验证
+        if not input_path:
+            return {
+                "success": False,
+                "error": "缺少必需参数: input_geojson_path"
+            }
         
         os.makedirs(RESULT_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = RESULT_DIR / f"buffer_filter_{buffer_distance}m_{timestamp}.geojson"
         
+        # 读取输入的GeoJSON文件
+        input_gdf = gpd.read_file(input_path)
+        
+        if input_gdf.empty:
+            os.makedirs(output_path.parent, exist_ok=True)
+            input_gdf.to_file(output_path, driver='GeoJSON')
+            return {
+                "success": True,
+                "result_path": str(output_path),
+                "region_count": 0,
+                "total_area_m2": 0.0
+            }
+        
+        # 从OSM文件读取建筑和道路数据
         nodes, buildings, roads = self._parse_osm_file()
         
         building_gdf = gpd.GeoDataFrame(buildings, crs='EPSG:4326') if buildings else gpd.GeoDataFrame([], crs='EPSG:4326')
         road_gdf = gpd.GeoDataFrame(roads, crs='EPSG:4326') if roads else gpd.GeoDataFrame([], crs='EPSG:4326')
         
-        bounds = self._get_bounds_from_osm()
-        if bounds is None:
-            if len(building_gdf) > 0 and len(road_gdf) > 0:
-                all_gdf = gpd.GeoDataFrame(pd.concat([building_gdf, road_gdf], ignore_index=True), crs='EPSG:4326')
-            elif len(building_gdf) > 0:
-                all_gdf = building_gdf
-            else:
-                all_gdf = road_gdf
-            bounds = all_gdf.total_bounds
-        
-        boundary = Polygon([
-            (bounds[0], bounds[1]), (bounds[2], bounds[1]),
-            (bounds[2], bounds[3]), (bounds[0], bounds[3]), (bounds[0], bounds[1])
-        ])
-        boundary_gdf = gpd.GeoDataFrame([{'geometry': boundary}], crs='EPSG:4326')
-        
-        boundary_gdf_utm = self._reproject_to_utm(boundary_gdf, utm_crs)
-        target_utm_crs = boundary_gdf_utm.crs
+        # 投影到UTM坐标系（用于计算缓冲区）
+        input_gdf_utm = self._reproject_to_utm(input_gdf, utm_crs)
+        target_utm_crs = input_gdf_utm.crs
         
         building_gdf_utm = self._reproject_to_utm(building_gdf, utm_crs) if len(building_gdf) > 0 else gpd.GeoDataFrame([], crs=target_utm_crs)
         road_gdf_utm = self._reproject_to_utm(road_gdf, utm_crs) if len(road_gdf) > 0 else gpd.GeoDataFrame([], crs=target_utm_crs)
         
+        # 创建建筑和道路缓冲区
         building_buffer = self._create_buffer_union(building_gdf_utm, buffer_distance) if len(building_gdf) > 0 else Polygon()
         road_buffer = self._create_buffer_union(road_gdf_utm, buffer_distance) if len(road_gdf) > 0 else Polygon()
         
+        # 合并缓冲区
         if building_buffer.is_empty and road_buffer.is_empty:
             excluded_areas = Polygon()
         elif building_buffer.is_empty:
@@ -177,30 +187,58 @@ class BufferFilterTool(BaseTool):
         else:
             excluded_areas = unary_union([building_buffer, road_buffer])
         
-        boundary_geom = boundary_gdf_utm.geometry.iloc[0]
-        empty_space = boundary_geom if excluded_areas.is_empty else boundary_geom.difference(excluded_areas)
+        # 筛选：从输入区域中排除建筑和道路缓冲区
+        filtered_geometries = []
+        for idx, row in input_gdf_utm.iterrows():
+            geom = row.geometry
+            if excluded_areas.is_empty:
+                filtered_geom = geom
+            else:
+                filtered_geom = geom.difference(excluded_areas)
+            
+            if filtered_geom.is_empty:
+                continue
+            
+            # 处理MultiPolygon
+            if hasattr(filtered_geom, 'geoms'):
+                for sub_geom in filtered_geom.geoms:
+                    if not sub_geom.is_empty:
+                        filtered_geometries.append(sub_geom)
+            elif isinstance(filtered_geom, Polygon):
+                filtered_geometries.append(filtered_geom)
         
-        if isinstance(empty_space, Polygon):
-            empty_space_list = [empty_space]
-        else:
-            empty_space_list = list(empty_space.geoms) if hasattr(empty_space, 'geoms') else [empty_space]
+        if not filtered_geometries:
+            empty_gdf = gpd.GeoDataFrame([], crs=target_utm_crs)
+            empty_gdf = empty_gdf.to_crs('EPSG:4326')
+            os.makedirs(output_path.parent, exist_ok=True)
+            empty_gdf.to_file(output_path, driver='GeoJSON')
+            return {
+                "success": True,
+                "result_path": str(output_path),
+                "region_count": 0,
+                "total_area_m2": 0.0
+            }
         
-        empty_space_gdf_utm = gpd.GeoDataFrame(
-            [{'geometry': geom, 'area_m2': geom.area} for geom in empty_space_list],
+        # 创建筛选后的GeoDataFrame
+        filtered_gdf_utm = gpd.GeoDataFrame(
+            [{'geometry': geom, 'area_m2': geom.area} for geom in filtered_geometries],
             crs=target_utm_crs
         )
         
-        empty_space_gdf = empty_space_gdf_utm.to_crs('EPSG:4326')
-        empty_space_gdf['area_km2'] = empty_space_gdf['area_m2'] / 1000000
+        # 转换回WGS84坐标系
+        filtered_gdf = filtered_gdf_utm.to_crs('EPSG:4326')
+        filtered_gdf['area_km2'] = filtered_gdf['area_m2'] / 1000000
         
-        empty_space_gdf.to_file(output_path, driver='GeoJSON')
+        # 保存结果
+        os.makedirs(output_path.parent, exist_ok=True)
+        filtered_gdf.to_file(output_path, driver='GeoJSON')
         
         return {
             "success": True,
             "result_path": str(output_path),
-            "region_count": len(empty_space_gdf),
-            "total_area_m2": float(empty_space_gdf['area_m2'].sum()) if not empty_space_gdf.empty else 0.0
+            "region_count": len(filtered_gdf),
+            "total_area_m2": float(filtered_gdf['area_m2'].sum()) if not filtered_gdf.empty else 0.0
         }
     
     def validate_params(self, **kwargs) -> bool:
-        return True
+        return kwargs.get("input_geojson_path") is not None
