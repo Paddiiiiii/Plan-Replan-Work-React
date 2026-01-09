@@ -26,7 +26,7 @@ except Exception:
     pass
 
 API_URL = "http://localhost:8000"
-API_TIMEOUT = 480
+API_TIMEOUT = 1800  # 增加到1800秒（30分钟），支持两轮LLM思考的长时间处理（每轮最长800秒）
 
 def load_geojson(file_path: str):
     try:

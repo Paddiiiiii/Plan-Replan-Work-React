@@ -279,14 +279,52 @@ def parse_plan_response(response: str) -> Dict:
         except Exception as e:
             logger.error(f"解析JSON对象时发生其他错误: {e}", exc_info=True)
     
-    # 如果无法解析，返回空结构并记录错误
-    logger.error(f"无法解析LLM响应中的JSON。响应前1000字符: {response[:1000]}")
+    # 如果无法解析，尝试查找可能的JSON开始位置
+    # 查找最后一个包含"{"的完整行，可能JSON从这里开始但被截断了
+    lines = response.split('\n')
+    json_start_line = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if '{' in lines[i] and ('"task"' in lines[i] or '"steps"' in lines[i] or '"sub_plans"' in lines[i]):
+            json_start_line = i
+            break
+    
+    if json_start_line >= 0:
+        # 尝试从找到的行开始构建JSON
+        json_candidate = '\n'.join(lines[json_start_line:])
+        # 尝试补全可能的截断JSON
+        if not json_candidate.rstrip().endswith('}'):
+            # 尝试补全
+            open_braces = json_candidate.count('{')
+            close_braces = json_candidate.count('}')
+            missing_braces = open_braces - close_braces
+            if missing_braces > 0:
+                json_candidate += '\n' + '}' * missing_braces
+        
+        try:
+            json_str_clean = _clean_json_string(json_candidate)
+            plan = json.loads(json_str_clean)
+            logger.warning("从不完整的响应中成功解析JSON（可能被截断）")
+            return _normalize_plan(plan, response, len('\n'.join(lines[:json_start_line])))
+        except:
+            pass
+    
+    # 如果完全无法解析，返回空结构并记录详细错误
+    logger.error(f"无法解析LLM响应中的JSON")
+    logger.error(f"响应总长度: {len(response)} 字符")
+    logger.error(f"响应开头1000字符:\n{response[:1000]}")
+    logger.error(f"响应结尾1000字符:\n{response[-1000:]}")
+    # 检查是否包含关键词
+    if '"task"' in response or '"steps"' in response or '"sub_plans"' in response:
+        logger.warning("响应中包含JSON关键词，但无法解析为有效JSON")
+    else:
+        logger.warning("响应中未找到JSON关键词，LLM可能未按要求输出JSON格式")
+    
     return {
         "task": "",
         "goal": "无法解析LLM响应",
         "steps": [],
         "estimated_steps": 0,
-        "error": "无法解析LLM响应中的JSON格式，请检查prompt和LLM输出"
+        "error": "无法解析LLM响应中的JSON格式，请检查prompt和LLM输出。响应可能被截断或格式不正确。"
     }
 
 
