@@ -206,6 +206,23 @@ class VegetationFilterTool(BaseTool):
                 "region_count": 0,
                 "total_area_m2": 0.0
             }
+        
+        # 如果输入区域太大（可能是初始GeoJSON），先进行细分
+        # 检查是否有区域面积超过1平方公里
+        if 'area_km2' not in gdf.columns:
+            # 需要计算面积
+            bounds = gdf.total_bounds
+            center_lon = (bounds[0] + bounds[2]) / 2
+            center_lat = (bounds[1] + bounds[3]) / 2
+            utm_zone = int((center_lon + 180) / 6) + 1
+            hemisphere = 'north' if center_lat >= 0 else 'south'
+            epsg_code = 32600 + utm_zone if hemisphere == 'north' else 32700 + utm_zone
+            gdf_utm = gdf.to_crs(f'EPSG:{epsg_code}')
+            gdf['area_km2'] = gdf_utm.geometry.area / 1000000
+        
+        # 如果存在大面积区域（>1平方公里），进行细分
+        if gdf['area_km2'].max() > 1.0:
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
 
         if vegetation_types is None and exclude_types is None:
             os.makedirs(output_path.parent, exist_ok=True)
@@ -243,6 +260,9 @@ class VegetationFilterTool(BaseTool):
             filtered_gdf['vegetation_code'] = veg_code_series.loc[valid_indices].values
             filtered_gdf['vegetation_type'] = veg_name_series.loc[valid_indices].values
 
+        # 裁剪到地理边界
+        filtered_gdf = self.clip_to_bounds(filtered_gdf)
+        
         os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
 

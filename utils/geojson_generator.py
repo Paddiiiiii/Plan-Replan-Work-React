@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import xml.etree.ElementTree as ET
 import pyproj
+from config import GEO_BOUNDS
 
 BASE_DIR = Path(__file__).parent.parent
 OSM_PATH = BASE_DIR / "data" / "nj_merged.osm"
@@ -69,11 +70,13 @@ def generate_initial_geojson(utm_crs: Optional[str] = None) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = RESULT_DIR / f"initial_region_{timestamp}.geojson"
     
-    # 从OSM文件获取边界
-    bounds = _get_bounds_from_osm()
-    if bounds is None:
-        # 如果无法从OSM获取边界，使用默认边界（南京区域）
-        bounds = (118.5, 31.5, 119.0, 32.5)
+    # 使用配置的地理边界限制
+    bounds = (
+        GEO_BOUNDS["min_lon"],
+        GEO_BOUNDS["min_lat"],
+        GEO_BOUNDS["max_lon"],
+        GEO_BOUNDS["max_lat"]
+    )
     
     # 创建边界多边形
     boundary = Polygon([

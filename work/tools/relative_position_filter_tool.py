@@ -183,12 +183,30 @@ class RelativePositionFilterTool(BaseTool):
                 "total_area_m2": 0.0
             }
         
+        # 如果输入区域太大（可能是初始GeoJSON），先进行细分
+        # 检查是否有区域面积超过1平方公里
+        if 'area_km2' not in gdf.columns:
+            # 需要计算面积
+            bounds = gdf.total_bounds
+            center_lon = (bounds[0] + bounds[2]) / 2
+            center_lat = (bounds[1] + bounds[3]) / 2
+            utm_zone = int((center_lon + 180) / 6) + 1
+            hemisphere = 'north' if center_lat >= 0 else 'south'
+            epsg_code = 32600 + utm_zone if hemisphere == 'north' else 32700 + utm_zone
+            gdf_utm = gdf.to_crs(f'EPSG:{epsg_code}')
+            gdf['area_km2'] = gdf_utm.geometry.area / 1000000
+        
+        # 如果存在大面积区域（>1平方公里），进行细分
+        if gdf['area_km2'].max() > 1.0:
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
+        
         valid_indices = []
-        relative_positions = []
+        relative_positions_dict = {}  # 使用字典存储，键为索引
         
         # 遍历每个区域，判断相对位置
         for idx, row in gdf.iterrows():
             if not isinstance(row.geometry, Polygon):
+                # 跳过非Polygon类型，不在字典中添加
                 continue
             
             position = self._get_relative_position(
@@ -197,17 +215,20 @@ class RelativePositionFilterTool(BaseTool):
             
             if position is not None:
                 valid_indices.append(idx)
-                relative_positions.append(position)
-            else:
-                relative_positions.append(None)
+                relative_positions_dict[idx] = position
+            # 如果position为None，不添加到字典中（也不添加到valid_indices）
         
         # 创建筛选后的GeoDataFrame
         filtered_gdf = gdf.loc[valid_indices].copy()
         
         # 添加相对位置属性
-        if relative_positions:
-            position_series = pd.Series(relative_positions, index=gdf.index)
-            filtered_gdf['relative_position'] = position_series.loc[valid_indices].values
+        if relative_positions_dict and valid_indices:
+            # 只为有效索引创建Series
+            position_values = [relative_positions_dict.get(idx) for idx in valid_indices]
+            filtered_gdf['relative_position'] = position_values
+        
+        # 裁剪到地理边界
+        filtered_gdf = self.clip_to_bounds(filtered_gdf)
         
         os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
@@ -216,7 +237,9 @@ class RelativePositionFilterTool(BaseTool):
             "success": True,
             "result_path": str(output_path),
             "region_count": len(filtered_gdf),
-            "total_area_m2": float(filtered_gdf['area_m2'].sum()) if not filtered_gdf.empty and 'area_m2' in filtered_gdf.columns else 0.0
+            "total_area_m2": float(filtered_gdf['area_m2'].sum()) if not filtered_gdf.empty and 'area_m2' in filtered_gdf.columns else 0.0,
+            "reference_point": {"lon": ref_lon, "lat": ref_lat},
+            "reference_direction": reference_direction
         }
     
     def validate_params(self, **kwargs) -> bool:

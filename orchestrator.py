@@ -50,9 +50,12 @@ class Orchestrator:
                     f"成功: {sub_result.get('success', False)}"
                 )
         
+        # 使用更新后的plan（包含kag_results和LLM响应），如果work_result中有的话
+        final_plan = work_result.get("updated_plan", plan)
+        
         return {
             "success": work_result.get("success", False),
-            "plan": plan,
+            "plan": final_plan,
             "result": work_result,
             "iterations": 1  # 不再重试，只执行一次
         }

@@ -66,6 +66,13 @@ class WorkAgent:
                 "error": tool_plan.get("error", "无法生成工具调用计划")
             }
         
+        # 将原始plan中的kag_results等信息合并到tool_plan中，供前端展示
+        tool_plan["original_query"] = original_query
+        tool_plan["kag_results"] = kag_results
+        tool_plan["combined_kag_answers"] = combined_kag_answers
+        if plan.get("sub_questions"):
+            tool_plan["sub_questions"] = plan.get("sub_questions")
+        
         # 在终端显示工具调用计划
         print("\n" + "=" * 80)
         print("🔧 工具调用计划（JSON格式）")
@@ -113,9 +120,14 @@ class WorkAgent:
         
         # 执行工具调用计划
         if "sub_plans" in tool_plan:
-            return self._execute_sub_plans(tool_plan)
+            work_result = self._execute_sub_plans(tool_plan)
         else:
-            return self._execute_single_plan(tool_plan)
+            work_result = self._execute_single_plan(tool_plan)
+        
+        # 将更新后的plan（包含kag_results和LLM响应）添加到work_result中
+        work_result["updated_plan"] = tool_plan
+        
+        return work_result
     
     def _format_tools_schema_for_prompt(self) -> str:
         """
@@ -280,6 +292,10 @@ class WorkAgent:
         else:
             steps = tool_plan.get('steps', [])
             logger.info(f"Work阶段 - 单任务模式，步骤数: {len(steps)}")
+        
+        # 保存第一轮和第二轮LLM响应，供前端展示
+        tool_plan["first_llm_response"] = first_response
+        tool_plan["second_llm_response"] = second_response
         
         return tool_plan
     

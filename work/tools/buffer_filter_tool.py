@@ -11,7 +11,7 @@ from datetime import datetime
 from work.tools.base_tool import BaseTool
 
 BASE_DIR = Path(__file__).parent.parent.parent
-OSM_PATH = BASE_DIR / "data" / "nj_merged.osm"
+OSM_PATH = BASE_DIR / "data" / "118.5_31.5.osm"
 RESULT_DIR = BASE_DIR / "result"
 
 
@@ -228,6 +228,15 @@ class BufferFilterTool(BaseTool):
         # 转换回WGS84坐标系
         filtered_gdf = filtered_gdf_utm.to_crs('EPSG:4326')
         filtered_gdf['area_km2'] = filtered_gdf['area_m2'] / 1000000
+        
+        # 裁剪到地理边界
+        filtered_gdf = self.clip_to_bounds(filtered_gdf)
+        # 重新计算面积（裁剪后）
+        if not filtered_gdf.empty:
+            filtered_gdf_utm = filtered_gdf.to_crs(target_utm_crs)
+            filtered_gdf['area_m2'] = filtered_gdf_utm.geometry.area
+            filtered_gdf['area_km2'] = filtered_gdf['area_m2'] / 1000000
+            filtered_gdf = filtered_gdf.to_crs('EPSG:4326')
         
         # 保存结果
         os.makedirs(output_path.parent, exist_ok=True)

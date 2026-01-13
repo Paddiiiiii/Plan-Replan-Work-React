@@ -8,6 +8,7 @@ import time
 import requests
 from typing import Optional, Dict
 import os
+from config import GEO_BOUNDS
 
 os.environ.setdefault("PYTHONUTF8", "1")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
@@ -56,7 +57,25 @@ def _display_result(sub_result: Dict, plan: Dict):
         return
     
     st.subheader(f"{unit} - 结果地图")
-    m = create_map(gdf)
+    # 检查是否有相对位置筛选的参数
+    reference_point = None
+    reference_direction = None
+    for step_result in steps:
+        if step_result.get("success") and step_result.get("tool") == "relative_position_filter_tool":
+            step_params = step_result.get("params", {})
+            result_data = step_result.get("result", {})
+            # 优先使用结果中的参考点信息（工具返回的）
+            if result_data.get("reference_point"):
+                reference_point = result_data.get("reference_point")
+            elif step_params.get("reference_point"):
+                reference_point = step_params.get("reference_point")
+            if result_data.get("reference_direction") is not None:
+                reference_direction = result_data.get("reference_direction")
+            elif step_params.get("reference_direction") is not None:
+                reference_direction = step_params.get("reference_direction")
+            break
+    
+    m = create_map(gdf, reference_point=reference_point, reference_direction=reference_direction)
     if m:
         st.components.v1.html(m._repr_html_(), height=600)
     
@@ -146,7 +165,7 @@ def _display_result(sub_result: Dict, plan: Dict):
     else:
         st.info("无筛选参数信息")
 
-def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
+def create_map(gdf: gpd.GeoDataFrame, reference_point: Optional[Dict] = None, reference_direction: Optional[float] = None) -> Optional[folium.Map]:
     if gdf is None or gdf.empty:
         return None
 
@@ -154,11 +173,20 @@ def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
         bounds = gdf.total_bounds
         center_lat = (bounds[1] + bounds[3]) / 2
         center_lon = (bounds[0] + bounds[2]) / 2
+        
+        # 限制中心点在地理边界内
+        center_lat = max(GEO_BOUNDS["min_lat"], min(GEO_BOUNDS["max_lat"], center_lat))
+        center_lon = max(GEO_BOUNDS["min_lon"], min(GEO_BOUNDS["max_lon"], center_lon))
 
         m = folium.Map(
             location=[center_lat, center_lon],
             zoom_start=12,
-            tiles='OpenStreetMap'
+            tiles='OpenStreetMap',
+            max_bounds=[
+                [GEO_BOUNDS["min_lat"], GEO_BOUNDS["min_lon"]],
+                [GEO_BOUNDS["max_lat"], GEO_BOUNDS["max_lon"]]
+            ],
+            min_zoom=10
         )
 
         geojson_layer = folium.GeoJson(
@@ -181,6 +209,55 @@ def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
             )
 
         geojson_layer.add_to(m)
+        
+        # 如果提供了参考点和方向，在地图上显示
+        if reference_point and reference_direction is not None:
+            ref_lon = reference_point.get("lon")
+            ref_lat = reference_point.get("lat")
+            if ref_lon is not None and ref_lat is not None:
+                # 添加参考点标记
+                folium.Marker(
+                    [ref_lat, ref_lon],
+                    popup=f"参考点<br>坐标: ({ref_lon:.6f}, {ref_lat:.6f})<br>方向: {reference_direction}°",
+                    tooltip="参考点",
+                    icon=folium.Icon(color='red', icon='flag', prefix='fa')
+                ).add_to(m)
+                
+                # 添加方向箭头
+                import math
+                # 计算箭头终点（方向角转换为从正北顺时针的角度）
+                # reference_direction 是0-360度，0为正北，顺时针
+                # 转换为弧度
+                angle_rad = math.radians(reference_direction)
+                
+                # 计算箭头终点（距离参考点约500米）
+                arrow_length = 0.005  # 约500米（在纬度上）
+                # 经度方向需要考虑纬度
+                lat_offset = arrow_length * math.cos(angle_rad)
+                lon_offset = arrow_length * math.sin(angle_rad) / math.cos(math.radians(ref_lat))
+                
+                arrow_end_lat = ref_lat + lat_offset
+                arrow_end_lon = ref_lon + lon_offset
+                
+                # 绘制方向箭头
+                folium.PolyLine(
+                    [[ref_lat, ref_lon], [arrow_end_lat, arrow_end_lon]],
+                    color='red',
+                    weight=3,
+                    opacity=0.8,
+                    popup=f"参考方向: {reference_direction}°"
+                ).add_to(m)
+                
+                # 在箭头终点添加方向标记
+                folium.Marker(
+                    [arrow_end_lat, arrow_end_lon],
+                    icon=folium.DivIcon(
+                        html=f'<div style="font-size: 20px; color: red;">→</div>',
+                        icon_size=(20, 20),
+                        icon_anchor=(10, 10)
+                    )
+                ).add_to(m)
+        
         folium.LayerControl().add_to(m)
 
         return m
@@ -209,7 +286,9 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "我方现在正在进攻，步兵部署在118.786310,32.027770位置，战场正方向为110°（正北方向为0°），筛选出坦克的部署位置"
+            st.session_state.task_input = "我方现在正在进攻，步兵部署在118.5,31.5位置，战场正方向为110°（正北方向为0°），筛选出坦克的部署位置"
+        if "execution_completed" not in st.session_state:
+            st.session_state.execution_completed = False
 
         if st.session_state.current_stage == "input":
             st.subheader("输入任务")
@@ -223,6 +302,8 @@ def main():
             if st.button("执行任务", type="primary"):
                 st.session_state.task_input = task_input
                 st.session_state.current_stage = "executing"
+                st.session_state.execution_completed = False  # 重置执行完成标志
+                st.session_state.last_result_data = None  # 清除之前的结果
                 st.rerun()
 
         elif st.session_state.current_stage == "executing":
@@ -230,230 +311,478 @@ def main():
 
             task_input = st.session_state.task_input
             if task_input:
-                with st.spinner("正在生成计划并执行任务（这可能需要一些时间）..."):
-                    try:
-                        # 直接调用完整任务接口（规划+执行）
-                        response = requests.post(
-                            f"{API_URL}/api/task",
-                            json={"task": task_input},
-                            timeout=API_TIMEOUT
-                        )
-
-                        if response.status_code == 200:
-                            result = response.json()
-
-                            if result.get("success"):
-                                st.success("任务执行成功！")
-
-                                result_data = result.get("result", {})
-                                work_result = result_data.get("result", {})
-                                plan = result_data.get("plan", {})  # 从结果中获取plan
-                                # 保存plan到session_state，供_display_result使用
-                                st.session_state.current_plan = plan
-
-                                if work_result.get("sub_results"):
-                                    sub_results = work_result.get("sub_results", [])
-                                    if len(sub_results) > 1:
-                                        tabs = st.tabs([f"{sub_result.get('unit', f'任务{i+1}')}" for i, sub_result in enumerate(sub_results)])
-                                        for i, (tab, sub_result) in enumerate(zip(tabs, sub_results)):
-                                            with tab:
-                                                _display_result(sub_result, plan)
-                                    else:
-                                        if sub_results:
-                                            _display_result(sub_results[0], plan)
-                                else:
-                                    final_result_path = None
-                                    if work_result.get("final_result_path"):
-                                        final_result_path = work_result["final_result_path"]
-                                    elif work_result.get("results"):
-                                        for r in work_result.get("results", []):
-                                            if r.get("success") and r.get("result", {}).get("result_path"):
-                                                final_result_path = r["result"]["result_path"]
-                                                break
-
-                                    if final_result_path:
-                                        gdf = load_geojson(final_result_path)
-
-                                        if gdf is not None:
-                                            st.subheader("结果地图")
-                                            m = create_map(gdf)
-                                            if m:
-                                                st.components.v1.html(m._repr_html_(), height=600)
-
-                                            st.subheader("统计信息")
-                                            col1, col2, col3 = st.columns(3)
-                                            with col1:
-                                                st.metric("区域数量", len(gdf))
-                                            with col2:
-                                                total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
-                                                st.metric("总面积 (m²)", f"{total_area:,.0f}")
-                                            with col3:
-                                                total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
-                                                st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
-
-                                            # 显示筛选参数
-                                            st.subheader("筛选参数")
-                                            filter_params = {}
-                                            
-                                            # 从执行结果中提取筛选参数
-                                            if work_result.get("results"):
-                                                for step_result in work_result.get("results", []):
-                                                    if step_result.get("success"):
-                                                        tool_name = step_result.get("tool", "")
-                                                        step_params = step_result.get("params", {})
-                                                        
-                                                        if tool_name == "buffer_filter_tool":
-                                                            buffer_dist = step_params.get("buffer_distance")
-                                                            if buffer_dist is not None:
-                                                                filter_params["缓冲区距离"] = f"{buffer_dist} 米"
-                                                        elif tool_name == "elevation_filter_tool":
-                                                            min_elev = step_params.get("min_elev")
-                                                            max_elev = step_params.get("max_elev")
-                                                            if min_elev is not None or max_elev is not None:
-                                                                elev_str = ""
-                                                                if min_elev is not None:
-                                                                    elev_str += f"{min_elev} 米"
-                                                                if max_elev is not None:
-                                                                    if elev_str:
-                                                                        elev_str += " - "
-                                                                    elev_str += f"{max_elev} 米"
-                                                                filter_params["高程范围"] = elev_str
-                                                        elif tool_name == "slope_filter_tool":
-                                                            min_slope = step_params.get("min_slope")
-                                                            max_slope = step_params.get("max_slope")
-                                                            if min_slope is not None or max_slope is not None:
-                                                                slope_str = ""
-                                                                if min_slope is not None:
-                                                                    slope_str += f"{min_slope}°"
-                                                                if max_slope is not None:
-                                                                    if slope_str:
-                                                                        slope_str += " - "
-                                                                    slope_str += f"{max_slope}°"
-                                                                filter_params["坡度范围"] = slope_str
-                                                        elif tool_name == "vegetation_filter_tool":
-                                                            veg_types = step_params.get("vegetation_types", [])
-                                                            exclude_types = step_params.get("exclude_types", [])
-                                                            if veg_types:
-                                                                veg_names = {
-                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                                }
-                                                                veg_list = [veg_names.get(v, str(v)) for v in veg_types]
-                                                                filter_params["植被类型"] = ", ".join(veg_list)
-                                                            elif exclude_types:
-                                                                veg_names = {
-                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                                }
-                                                                exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
-                                                                filter_params["排除植被类型"] = ", ".join(exclude_list)
-                                                        elif tool_name == "relative_position_filter_tool":
-                                                            reference_point = step_params.get("reference_point", {})
-                                                            reference_direction = step_params.get("reference_direction")
-                                                            position_types = step_params.get("position_types", [])
-                                                            if reference_point:
-                                                                lon = reference_point.get("lon")
-                                                                lat = reference_point.get("lat")
-                                                                if lon is not None and lat is not None:
-                                                                    filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
-                                                            if reference_direction is not None:
-                                                                filter_params["参考方向"] = f"{reference_direction}°"
-                                                            if position_types:
-                                                                filter_params["相对位置类型"] = ", ".join(position_types)
-                                            
-                                            # 如果执行结果中没有参数，尝试从plan中提取
-                                            if not filter_params and plan:
-                                                if plan.get("steps"):
-                                                    for step in plan.get("steps", []):
-                                                        step_params = step.get("params", {})
-                                                        if step.get("tool") == "buffer_filter_tool":
-                                                            if "buffer_distance" in step_params:
-                                                                filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
-                                                        elif step.get("tool") == "elevation_filter_tool":
-                                                            min_elev = step_params.get("min_elev")
-                                                            max_elev = step_params.get("max_elev")
-                                                            if min_elev is not None or max_elev is not None:
-                                                                elev_str = ""
-                                                                if min_elev is not None:
-                                                                    elev_str += f"{min_elev} 米"
-                                                                if max_elev is not None:
-                                                                    if elev_str:
-                                                                        elev_str += " - "
-                                                                    elev_str += f"{max_elev} 米"
-                                                                filter_params["高程范围"] = elev_str
-                                                        elif step.get("tool") == "slope_filter_tool":
-                                                            min_slope = step_params.get("min_slope")
-                                                            max_slope = step_params.get("max_slope")
-                                                            if min_slope is not None or max_slope is not None:
-                                                                slope_str = ""
-                                                                if min_slope is not None:
-                                                                    slope_str += f"{min_slope}°"
-                                                                if max_slope is not None:
-                                                                    if slope_str:
-                                                                        slope_str += " - "
-                                                                    slope_str += f"{max_slope}°"
-                                                                filter_params["坡度范围"] = slope_str
-                                                        elif step.get("tool") == "vegetation_filter_tool":
-                                                            veg_types = step_params.get("vegetation_types", [])
-                                                            exclude_types = step_params.get("exclude_types", [])
-                                                            if veg_types:
-                                                                veg_names = {
-                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                                }
-                                                                veg_list = [veg_names.get(v, str(v)) for v in veg_types]
-                                                                filter_params["植被类型"] = ", ".join(veg_list)
-                                                            elif exclude_types:
-                                                                veg_names = {
-                                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
-                                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
-                                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
-                                                                }
-                                                                exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
-                                                                filter_params["排除植被类型"] = ", ".join(exclude_list)
-                                                        elif step.get("type") == "relative_position" or step.get("tool") == "relative_position_filter_tool":
-                                                            reference_point = step_params.get("reference_point", {})
-                                                            reference_direction = step_params.get("reference_direction")
-                                                            position_types = step_params.get("position_types", [])
-                                                            if reference_point:
-                                                                lon = reference_point.get("lon")
-                                                                lat = reference_point.get("lat")
-                                                                if lon is not None and lat is not None:
-                                                                    filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
-                                                            if reference_direction is not None:
-                                                                filter_params["参考方向"] = f"{reference_direction}°"
-                                                            if position_types:
-                                                                filter_params["相对位置类型"] = ", ".join(position_types)
-                                            
-                                            if filter_params:
-                                                param_cols = st.columns(len(filter_params))
-                                                for idx, (key, value) in enumerate(filter_params.items()):
-                                                    with param_cols[idx]:
-                                                        st.metric(key, value)
-                                            else:
-                                                st.info("无筛选参数信息")
-
-                                st.markdown("---")
-
-                                if st.button("开始新任务", type="primary"):
-                                    # 重置状态，直接回到任务输入界面
-                                    st.session_state.current_plan = None
-                                    st.session_state.current_stage = "input"
-                                    st.rerun()
-                            else:
-                                st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
-                                if st.button("重新输入任务", type="primary"):
-                                    st.session_state.current_plan = None
-                                    st.session_state.current_stage = "input"
-                                    st.rerun()
+                # 如果已经执行完成，直接显示结果，不重新执行
+                if st.session_state.execution_completed:
+                    # 在顶部添加"开始新任务"按钮
+                    col1, col2 = st.columns([3, 1])
+                    with col2:
+                        if st.button("开始新任务", type="primary", key="new_task_cached"):
+                            # 重置状态，回到任务输入界面，保留task_input
+                            st.session_state.current_plan = None
+                            st.session_state.execution_completed = False
+                            st.session_state.last_result_data = None
+                            st.session_state.current_stage = "input"
+                            st.rerun()
+                    
+                    st.info("任务已完成，显示结果如下：")
+                    # 重新获取保存的结果
+                    result_data = st.session_state.get("last_result_data", {})
+                    work_result = result_data.get("result", {})
+                    plan = st.session_state.current_plan
+                    
+                    if work_result.get("sub_results"):
+                        sub_results = work_result.get("sub_results", [])
+                        if len(sub_results) > 1:
+                            tabs = st.tabs([f"{sub_result.get('unit', f'任务{i+1}')}" for i, sub_result in enumerate(sub_results)])
+                            for i, (tab, sub_result) in enumerate(zip(tabs, sub_results)):
+                                with tab:
+                                    _display_result(sub_result, plan)
                         else:
-                            st.error(f"API请求失败: {response.status_code}")
-                    except requests.exceptions.RequestException as e:
-                        st.error(f"连接API失败: {e}")
-                        st.info("请确保后端服务已启动（运行 main.py）")
+                            if sub_results:
+                                _display_result(sub_results[0], plan)
+                    else:
+                        final_result_path = None
+                        if work_result.get("final_result_path"):
+                            final_result_path = work_result["final_result_path"]
+                        elif work_result.get("results"):
+                            for r in work_result.get("results", []):
+                                if r.get("success") and r.get("result", {}).get("result_path"):
+                                    final_result_path = r["result"]["result_path"]
+                                    break
+
+                        if final_result_path:
+                            gdf = load_geojson(final_result_path)
+                            if gdf is not None:
+                                # 提取参考点和方向信息（用于地图显示）
+                                map_reference_point = None
+                                map_reference_direction = None
+                                
+                                st.subheader("结果地图")
+                                
+                                # 显示筛选参数（从plan中提取）
+                                st.subheader("筛选参数")
+                                filter_params = {}
+                                if plan and plan.get("steps"):
+                                    for step in plan.get("steps", []):
+                                        step_params = step.get("params", {})
+                                        if step.get("type") == "buffer" or step.get("tool") == "buffer_filter_tool":
+                                            if "buffer_distance" in step_params:
+                                                filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
+                                        elif step.get("type") == "elevation" or step.get("tool") == "elevation_filter_tool":
+                                            min_elev = step_params.get("min_elev")
+                                            max_elev = step_params.get("max_elev")
+                                            if min_elev is not None or max_elev is not None:
+                                                elev_str = ""
+                                                if min_elev is not None:
+                                                    elev_str += f"{min_elev} 米"
+                                                if max_elev is not None:
+                                                    if elev_str:
+                                                        elev_str += " - "
+                                                    elev_str += f"{max_elev} 米"
+                                                filter_params["高程范围"] = elev_str
+                                        elif step.get("type") == "slope" or step.get("tool") == "slope_filter_tool":
+                                            min_slope = step_params.get("min_slope")
+                                            max_slope = step_params.get("max_slope")
+                                            if min_slope is not None or max_slope is not None:
+                                                slope_str = ""
+                                                if min_slope is not None:
+                                                    slope_str += f"{min_slope}°"
+                                                if max_slope is not None:
+                                                    if slope_str:
+                                                        slope_str += " - "
+                                                    slope_str += f"{max_slope}°"
+                                                filter_params["坡度范围"] = slope_str
+                                        elif step.get("type") == "vegetation" or step.get("tool") == "vegetation_filter_tool":
+                                            veg_types = step_params.get("vegetation_types", [])
+                                            exclude_types = step_params.get("exclude_types", [])
+                                            if veg_types:
+                                                veg_names = {
+                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                }
+                                                veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                filter_params["植被类型"] = ", ".join(veg_list)
+                                            elif exclude_types:
+                                                veg_names = {
+                                                    10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                    50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                    80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                }
+                                                exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                        elif step.get("type") == "relative_position" or step.get("tool") == "relative_position_filter_tool":
+                                            reference_point = step_params.get("reference_point", {})
+                                            reference_direction = step_params.get("reference_direction")
+                                            position_types = step_params.get("position_types", [])
+                                            if reference_point:
+                                                lon = reference_point.get("lon")
+                                                lat = reference_point.get("lat")
+                                                if lon is not None and lat is not None:
+                                                    filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                                                    # 保存用于地图显示
+                                                    map_reference_point = reference_point
+                                            if reference_direction is not None:
+                                                filter_params["参考方向"] = f"{reference_direction}°"
+                                                # 保存用于地图显示
+                                                map_reference_direction = reference_direction
+                                            if position_types:
+                                                filter_params["相对位置类型"] = ", ".join(position_types)
+                                
+                                m = create_map(gdf, reference_point=map_reference_point, reference_direction=map_reference_direction)
+                                if m:
+                                    st.components.v1.html(m._repr_html_(), height=600)
+                                
+                                st.subheader("统计信息")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("区域数量", len(gdf))
+                                with col2:
+                                    total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
+                                    st.metric("总面积 (m²)", f"{total_area:,.0f}")
+                                with col3:
+                                    total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
+                                    st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+                                
+                                if filter_params:
+                                    param_cols = st.columns(len(filter_params))
+                                    for idx, (key, value) in enumerate(filter_params.items()):
+                                        with param_cols[idx]:
+                                            st.metric(key, value)
+                                else:
+                                    st.info("无筛选参数信息")
+                                
+                                # 显示KAG问答结果和LLM响应（可折叠）
+                                st.markdown("---")
+                                with st.expander("📋 KAG问答结果与LLM思考过程", expanded=False):
+                                    # 显示KAG问答结果
+                                    if plan and plan.get("kag_results"):
+                                        st.subheader("KAG知识召回结果")
+                                        kag_results = plan.get("kag_results", [])
+                                        st.write(f"共{len(kag_results)}个问题：")
+                                        for i, kag_result in enumerate(kag_results, 1):
+                                            question = kag_result.get("question", "")
+                                            answer = kag_result.get("answer", "")
+                                            st.markdown(f"**问题{i}**: {question}")
+                                            st.markdown(f"**答案{i}**: {answer}")
+                                            st.markdown("---")
+                                    
+                                    # 显示第一轮LLM响应
+                                    if plan and plan.get("first_llm_response"):
+                                        st.subheader("第一轮LLM思考（工具选择和参数提取）")
+                                        st.text_area(
+                                            "第一轮LLM响应",
+                                            value=plan.get("first_llm_response", ""),
+                                            height=200,
+                                            key="first_llm_response_display_cached",
+                                            label_visibility="collapsed"
+                                        )
+                                    
+                                    # 显示第二轮LLM响应
+                                    if plan and plan.get("second_llm_response"):
+                                        st.subheader("第二轮LLM思考（工具调用计划编织）")
+                                        st.text_area(
+                                            "第二轮LLM响应",
+                                            value=plan.get("second_llm_response", ""),
+                                            height=200,
+                                            key="second_llm_response_display_cached",
+                                            label_visibility="collapsed"
+                                        )
+                else:
+                    # 首次执行，执行任务
+                    with st.spinner("正在生成计划并执行任务（这可能需要一些时间）..."):
+                        try:
+                            # 直接调用完整任务接口（规划+执行）
+                            response = requests.post(
+                                f"{API_URL}/api/task",
+                                json={"task": task_input},
+                                timeout=API_TIMEOUT
+                            )
+
+                            if response.status_code == 200:
+                                result = response.json()
+
+                                if result.get("success"):
+                                    st.success("任务执行成功！")
+                                    
+                                    # 标记执行完成，保存结果
+                                    st.session_state.execution_completed = True
+                                    result_data = result.get("result", {})
+                                    st.session_state.last_result_data = result_data
+                                    work_result = result_data.get("result", {})
+                                    plan = result_data.get("plan", {})  # 从结果中获取plan
+                                    # 保存plan到session_state，供_display_result使用
+                                    st.session_state.current_plan = plan
+
+                                    # 在顶部添加"开始新任务"按钮
+                                    col1, col2 = st.columns([3, 1])
+                                    with col2:
+                                        if st.button("开始新任务", type="primary", key="new_task_top"):
+                                            # 重置状态，回到任务输入界面，保留task_input
+                                            st.session_state.current_plan = None
+                                            st.session_state.execution_completed = False
+                                            st.session_state.last_result_data = None
+                                            st.session_state.current_stage = "input"
+                                            st.rerun()
+
+                                    if work_result.get("sub_results"):
+                                        sub_results = work_result.get("sub_results", [])
+                                        if len(sub_results) > 1:
+                                            tabs = st.tabs([f"{sub_result.get('unit', f'任务{i+1}')}" for i, sub_result in enumerate(sub_results)])
+                                            for i, (tab, sub_result) in enumerate(zip(tabs, sub_results)):
+                                                with tab:
+                                                    _display_result(sub_result, plan)
+                                        else:
+                                            if sub_results:
+                                                _display_result(sub_results[0], plan)
+                                    else:
+                                        final_result_path = None
+                                        if work_result.get("final_result_path"):
+                                            final_result_path = work_result["final_result_path"]
+                                        elif work_result.get("results"):
+                                            for r in work_result.get("results", []):
+                                                if r.get("success") and r.get("result", {}).get("result_path"):
+                                                    final_result_path = r["result"]["result_path"]
+                                                    break
+
+                                        if final_result_path:
+                                            gdf = load_geojson(final_result_path)
+
+                                            if gdf is not None:
+                                                # 提取参考点和方向信息（用于地图显示）
+                                                map_reference_point = None
+                                                map_reference_direction = None
+                                                
+                                                st.subheader("结果地图")
+                                                
+                                                # 从执行结果中提取参考点和方向（用于地图显示）
+                                                if work_result.get("results"):
+                                                    for step_result in work_result.get("results", []):
+                                                        if step_result.get("success") and step_result.get("tool") == "relative_position_filter_tool":
+                                                            step_params = step_result.get("params", {})
+                                                            result_data = step_result.get("result", {})
+                                                            # 优先使用结果中的参考点信息（工具返回的）
+                                                            if result_data.get("reference_point"):
+                                                                map_reference_point = result_data.get("reference_point")
+                                                            elif step_params.get("reference_point"):
+                                                                map_reference_point = step_params.get("reference_point")
+                                                            if result_data.get("reference_direction") is not None:
+                                                                map_reference_direction = result_data.get("reference_direction")
+                                                            elif step_params.get("reference_direction") is not None:
+                                                                map_reference_direction = step_params.get("reference_direction")
+                                                            break
+                                                
+                                                m = create_map(gdf, reference_point=map_reference_point, reference_direction=map_reference_direction)
+                                                if m:
+                                                    st.components.v1.html(m._repr_html_(), height=600)
+
+                                                st.subheader("统计信息")
+                                                col1, col2, col3 = st.columns(3)
+                                                with col1:
+                                                    st.metric("区域数量", len(gdf))
+                                                with col2:
+                                                    total_area = gdf['area_m2'].sum() if 'area_m2' in gdf.columns else 0
+                                                    st.metric("总面积 (m²)", f"{total_area:,.0f}")
+                                                with col3:
+                                                    total_area_km2 = gdf['area_km2'].sum() if 'area_km2' in gdf.columns else 0
+                                                    st.metric("总面积 (km²)", f"{total_area_km2:,.2f}")
+
+                                                # 显示筛选参数
+                                                st.subheader("筛选参数")
+                                                filter_params = {}
+                                                
+                                                # 从执行结果中提取筛选参数
+                                                if work_result.get("results"):
+                                                    for step_result in work_result.get("results", []):
+                                                        if step_result.get("success"):
+                                                            tool_name = step_result.get("tool", "")
+                                                            step_params = step_result.get("params", {})
+                                                            
+                                                            if tool_name == "buffer_filter_tool":
+                                                                buffer_dist = step_params.get("buffer_distance")
+                                                                if buffer_dist is not None:
+                                                                    filter_params["缓冲区距离"] = f"{buffer_dist} 米"
+                                                            elif tool_name == "elevation_filter_tool":
+                                                                min_elev = step_params.get("min_elev")
+                                                                max_elev = step_params.get("max_elev")
+                                                                if min_elev is not None or max_elev is not None:
+                                                                    elev_str = ""
+                                                                    if min_elev is not None:
+                                                                        elev_str += f"{min_elev} 米"
+                                                                    if max_elev is not None:
+                                                                        if elev_str:
+                                                                            elev_str += " - "
+                                                                        elev_str += f"{max_elev} 米"
+                                                                    filter_params["高程范围"] = elev_str
+                                                            elif tool_name == "slope_filter_tool":
+                                                                min_slope = step_params.get("min_slope")
+                                                                max_slope = step_params.get("max_slope")
+                                                                if min_slope is not None or max_slope is not None:
+                                                                    slope_str = ""
+                                                                    if min_slope is not None:
+                                                                        slope_str += f"{min_slope}°"
+                                                                    if max_slope is not None:
+                                                                        if slope_str:
+                                                                            slope_str += " - "
+                                                                        slope_str += f"{max_slope}°"
+                                                                    filter_params["坡度范围"] = slope_str
+                                                            elif tool_name == "vegetation_filter_tool":
+                                                                veg_types = step_params.get("vegetation_types", [])
+                                                                exclude_types = step_params.get("exclude_types", [])
+                                                                if veg_types:
+                                                                    veg_names = {
+                                                                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                    }
+                                                                    veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                                    filter_params["植被类型"] = ", ".join(veg_list)
+                                                                elif exclude_types:
+                                                                    veg_names = {
+                                                                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                    }
+                                                                    exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                                    filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                                            elif tool_name == "relative_position_filter_tool":
+                                                                reference_point = step_params.get("reference_point", {})
+                                                                reference_direction = step_params.get("reference_direction")
+                                                                position_types = step_params.get("position_types", [])
+                                                                if reference_point:
+                                                                    lon = reference_point.get("lon")
+                                                                    lat = reference_point.get("lat")
+                                                                    if lon is not None and lat is not None:
+                                                                        filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                                                                        # 保存用于地图显示
+                                                                        map_reference_point = reference_point
+                                                                if reference_direction is not None:
+                                                                    filter_params["参考方向"] = f"{reference_direction}°"
+                                                                    # 保存用于地图显示
+                                                                    map_reference_direction = reference_direction
+                                                                if position_types:
+                                                                    filter_params["相对位置类型"] = ", ".join(position_types)
+                                                
+                                                # 如果执行结果中没有参数，尝试从plan中提取
+                                                if not filter_params and plan:
+                                                    if plan.get("steps"):
+                                                        for step in plan.get("steps", []):
+                                                            step_params = step.get("params", {})
+                                                            if step.get("tool") == "buffer_filter_tool":
+                                                                if "buffer_distance" in step_params:
+                                                                    filter_params["缓冲区距离"] = f"{step_params['buffer_distance']} 米"
+                                                            elif step.get("tool") == "elevation_filter_tool":
+                                                                min_elev = step_params.get("min_elev")
+                                                                max_elev = step_params.get("max_elev")
+                                                                if min_elev is not None or max_elev is not None:
+                                                                    elev_str = ""
+                                                                    if min_elev is not None:
+                                                                        elev_str += f"{min_elev} 米"
+                                                                    if max_elev is not None:
+                                                                        if elev_str:
+                                                                            elev_str += " - "
+                                                                        elev_str += f"{max_elev} 米"
+                                                                    filter_params["高程范围"] = elev_str
+                                                            elif step.get("tool") == "slope_filter_tool":
+                                                                min_slope = step_params.get("min_slope")
+                                                                max_slope = step_params.get("max_slope")
+                                                                if min_slope is not None or max_slope is not None:
+                                                                    slope_str = ""
+                                                                    if min_slope is not None:
+                                                                        slope_str += f"{min_slope}°"
+                                                                    if max_slope is not None:
+                                                                        if slope_str:
+                                                                            slope_str += " - "
+                                                                        slope_str += f"{max_slope}°"
+                                                                    filter_params["坡度范围"] = slope_str
+                                                            elif step.get("tool") == "vegetation_filter_tool":
+                                                                veg_types = step_params.get("vegetation_types", [])
+                                                                exclude_types = step_params.get("exclude_types", [])
+                                                                if veg_types:
+                                                                    veg_names = {
+                                                                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                    }
+                                                                    veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                                                                    filter_params["植被类型"] = ", ".join(veg_list)
+                                                                elif exclude_types:
+                                                                    veg_names = {
+                                                                        10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                                                        50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                                                        80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                                                                    }
+                                                                    exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                                                                    filter_params["排除植被类型"] = ", ".join(exclude_list)
+                                                            elif step.get("type") == "relative_position" or step.get("tool") == "relative_position_filter_tool":
+                                                                reference_point = step_params.get("reference_point", {})
+                                                                reference_direction = step_params.get("reference_direction")
+                                                                position_types = step_params.get("position_types", [])
+                                                                if reference_point:
+                                                                    lon = reference_point.get("lon")
+                                                                    lat = reference_point.get("lat")
+                                                                    if lon is not None and lat is not None:
+                                                                        filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                                                                if reference_direction is not None:
+                                                                    filter_params["参考方向"] = f"{reference_direction}°"
+                                                                if position_types:
+                                                                    filter_params["相对位置类型"] = ", ".join(position_types)
+                                                
+                                                if filter_params:
+                                                    param_cols = st.columns(len(filter_params))
+                                                    for idx, (key, value) in enumerate(filter_params.items()):
+                                                        with param_cols[idx]:
+                                                            st.metric(key, value)
+                                                else:
+                                                    st.info("无筛选参数信息")
+                                                
+                                                # 显示KAG问答结果和LLM响应（可折叠）
+                                                st.markdown("---")
+                                                with st.expander("📋 KAG问答结果与LLM思考过程", expanded=False):
+                                                    # 显示KAG问答结果
+                                                    if plan and plan.get("kag_results"):
+                                                        st.subheader("KAG知识召回结果")
+                                                        kag_results = plan.get("kag_results", [])
+                                                        st.write(f"共{len(kag_results)}个问题：")
+                                                        for i, kag_result in enumerate(kag_results, 1):
+                                                            question = kag_result.get("question", "")
+                                                            answer = kag_result.get("answer", "")
+                                                            st.markdown(f"**问题{i}**: {question}")
+                                                            st.markdown(f"**答案{i}**: {answer}")
+                                                            st.markdown("---")
+                                                    
+                                                    # 显示第一轮LLM响应
+                                                    if plan and plan.get("first_llm_response"):
+                                                        st.subheader("第一轮LLM思考（工具选择和参数提取）")
+                                                        st.text_area(
+                                                            "第一轮LLM响应",
+                                                            value=plan.get("first_llm_response", ""),
+                                                            height=200,
+                                                            key="first_llm_response_display",
+                                                            label_visibility="collapsed"
+                                                        )
+                                                    
+                                                    # 显示第二轮LLM响应
+                                                    if plan and plan.get("second_llm_response"):
+                                                        st.subheader("第二轮LLM思考（工具调用计划编织）")
+                                                        st.text_area(
+                                                            "第二轮LLM响应",
+                                                            value=plan.get("second_llm_response", ""),
+                                                            height=200,
+                                                            key="second_llm_response_display",
+                                                            label_visibility="collapsed"
+                                                        )
+                                else:
+                                    st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
+                                    if st.button("重新输入任务", type="primary"):
+                                        st.session_state.current_plan = None
+                                        st.session_state.current_stage = "input"
+                                        st.rerun()
+                            else:
+                                st.error(f"API请求失败: {response.status_code}")
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"连接API失败: {e}")
+                            st.info("请确保后端服务已启动（运行 main.py）")
 
     with tab2:
         st.header("历史结果")

@@ -46,3 +46,11 @@ KAG_CONFIG = {
 }
 
 RAG_CONFIG = KAG_CONFIG
+
+# 地理边界限制（经纬度范围）
+GEO_BOUNDS = {
+    "min_lon": 118.0,  # 西经
+    "max_lon": 119.0,  # 东经
+    "min_lat": 31.0,   # 南纬
+    "max_lat": 32.0    # 北纬
+}

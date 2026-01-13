@@ -12,7 +12,7 @@ from datetime import datetime
 from work.tools.base_tool import BaseTool
 
 BASE_DIR = Path(__file__).parent.parent.parent
-DEM_PATH = BASE_DIR / "data" / "dem.tif"
+TPI_PATH = BASE_DIR / "data" / "tpi_60_06.img"
 RESULT_DIR = BASE_DIR / "result"
 
 
@@ -28,9 +28,9 @@ class SlopeFilterTool(BaseTool):
             "max_slope": {"type": "number", "description": "最大坡度（度，0-90，可选）"}
         }
     
-    def _get_slope_from_dem(self, geometry: Polygon, min_slope: Optional[float] = None, max_slope: Optional[float] = None) -> Tuple[bool, Optional[float]]:
+    def _get_slope_from_tpi(self, geometry: Polygon, min_slope: Optional[float] = None, max_slope: Optional[float] = None) -> Tuple[bool, Optional[float]]:
         try:
-            with rasterio.open(str(DEM_PATH)) as src:
+            with rasterio.open(str(TPI_PATH)) as src:
                 geometry_transformed = geometry
                 if src.crs is not None:
                     try:
@@ -44,12 +44,12 @@ class SlopeFilterTool(BaseTool):
                 
                 try:
                     out_image, out_transform = mask(src, [geometry_transformed], crop=True, filled=False)
-                    elev_data = out_image[0].astype("float64")
+                    tpi_data = out_image[0].astype("float64")
                 except Exception:
-                    elev_data = None
-                    out_transform = None
+                    tpi_data = None
                 
-                if elev_data is None:
+                if tpi_data is None:
+                    # 如果无法裁剪，使用采样点方式
                     bounds = geometry.bounds
                     center = geometry.centroid
                     
@@ -69,7 +69,7 @@ class SlopeFilterTool(BaseTool):
                         except Exception:
                             sample_points = sample_points_ll
                     
-                    elevations = []
+                    tpi_values = []
                     for x, y in sample_points:
                         try:
                             for val in src.sample([(x, y)]):
@@ -77,81 +77,50 @@ class SlopeFilterTool(BaseTool):
                                 if src.nodata is not None and v == float(src.nodata):
                                     continue
                                 if np.isfinite(v):
-                                    elevations.append(v)
+                                    tpi_values.append(v)
                         except Exception:
                             continue
                     
-                    if len(elevations) < 2:
+                    if not tpi_values:
                         return True, None
                     
-                    elev_diff = max(elevations) - min(elevations)
+                    avg_tpi = float(np.mean(tpi_values))
                     
-                    if src.crs is not None and getattr(src.crs, "is_geographic", False):
-                        lat = center.y
-                        lon_diff = abs(bounds[2] - bounds[0])
-                        lat_diff = abs(bounds[3] - bounds[1])
-                        lon_m = lon_diff * 111320.0 * np.cos(np.radians(lat))
-                        lat_m = lat_diff * 111320.0
-                        dist_m = float(np.sqrt(lon_m * lon_m + lat_m * lat_m))
-                    else:
-                        b = geometry_transformed.bounds
-                        dist_m = float(np.sqrt((b[2] - b[0]) ** 2 + (b[3] - b[1]) ** 2))
+                    # 使用TPI值作为坡度值（假设TPI值代表坡度相关指标）
+                    slope_value = avg_tpi
                     
-                    if dist_m < 1.0:
-                        return True, None
-                    
-                    slope_deg = float(np.degrees(np.arctan(elev_diff / dist_m)))
-                    avg_slope = slope_deg
-                    
-                    if min_slope is not None and avg_slope < min_slope:
-                        return False, avg_slope
-                    if max_slope is not None and avg_slope >= max_slope:
-                        return False, avg_slope
-                    return True, avg_slope
+                    if min_slope is not None and slope_value < min_slope:
+                        return False, slope_value
+                    if max_slope is not None and slope_value >= max_slope:
+                        return False, slope_value
+                    return True, slope_value
                 
-                if np.ma.isMaskedArray(elev_data):
-                    elev_data = elev_data.filled(np.nan)
+                # 处理裁剪后的TPI数据
+                if np.ma.isMaskedArray(tpi_data):
+                    tpi_data = tpi_data.filled(np.nan)
                 
                 if src.nodata is not None:
-                    elev_data[elev_data == float(src.nodata)] = np.nan
+                    tpi_data[tpi_data == float(src.nodata)] = np.nan
                 
-                if elev_data.size == 0 or np.all(np.isnan(elev_data)):
+                if tpi_data.size == 0 or np.all(np.isnan(tpi_data)):
                     return True, None
                 
-                pixel_x = abs(out_transform.a)
-                pixel_y = abs(out_transform.e)
-                
-                if src.crs is not None and getattr(src.crs, "is_geographic", False):
-                    center_lat = geometry.centroid.y
-                    pixel_x_m = pixel_x * 111320.0 * np.cos(np.radians(center_lat))
-                    pixel_y_m = pixel_y * 111320.0
-                else:
-                    pixel_x_m = pixel_x
-                    pixel_y_m = pixel_y
-                
-                if pixel_x_m <= 0 or pixel_y_m <= 0:
-                    return True, None
-                
-                dy, dx = np.gradient(elev_data, pixel_y_m, pixel_x_m)
-                
-                slope_rad = np.arctan(np.sqrt(dx * dx + dy * dy))
-                slope_deg = np.degrees(slope_rad)
-                
-                if np.all(np.isnan(slope_deg)):
-                    return True, None
-                
-                valid = np.isfinite(slope_deg) & (slope_deg >= 0.0) & (slope_deg <= 90.0)
+                # 计算有效TPI值的平均值
+                valid = np.isfinite(tpi_data)
                 if not np.any(valid):
                     return True, None
                 
-                avg_slope = float(np.mean(slope_deg[valid]))
+                avg_tpi = float(np.mean(tpi_data[valid]))
                 
-                if min_slope is not None and avg_slope < min_slope:
-                    return False, avg_slope
-                if max_slope is not None and avg_slope >= max_slope:
-                    return False, avg_slope
+                # 使用TPI值作为坡度值
+                slope_value = avg_tpi
                 
-                return True, avg_slope
+                if min_slope is not None and slope_value < min_slope:
+                    return False, slope_value
+                if max_slope is not None and slope_value >= max_slope:
+                    return False, slope_value
+                
+                return True, slope_value
                 
         except Exception as e:
             return True, None
@@ -190,11 +159,28 @@ class SlopeFilterTool(BaseTool):
                 "total_area_m2": 0.0
             }
         
+        # 如果输入区域太大（可能是初始GeoJSON），先进行细分
+        # 检查是否有区域面积超过1平方公里
+        if 'area_km2' not in gdf.columns:
+            # 需要计算面积
+            bounds = gdf.total_bounds
+            center_lon = (bounds[0] + bounds[2]) / 2
+            center_lat = (bounds[1] + bounds[3]) / 2
+            utm_zone = int((center_lon + 180) / 6) + 1
+            hemisphere = 'north' if center_lat >= 0 else 'south'
+            epsg_code = 32600 + utm_zone if hemisphere == 'north' else 32700 + utm_zone
+            gdf_utm = gdf.to_crs(f'EPSG:{epsg_code}')
+            gdf['area_km2'] = gdf_utm.geometry.area / 1000000
+        
+        # 如果存在大面积区域（>1平方公里），进行细分
+        if gdf['area_km2'].max() > 1.0:
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
+        
         valid_indices = []
         slopes = []
         
         for idx, row in gdf.iterrows():
-            is_valid, slope = self._get_slope_from_dem(row.geometry, min_slope, max_slope)
+            is_valid, slope = self._get_slope_from_tpi(row.geometry, min_slope, max_slope)
             if is_valid:
                 valid_indices.append(idx)
                 slopes.append(slope)
@@ -206,6 +192,9 @@ class SlopeFilterTool(BaseTool):
         if slopes:
             slope_series = pd.Series(slopes, index=gdf.index)
             filtered_gdf["slope_deg"] = slope_series.loc[valid_indices].values
+        
+        # 裁剪到地理边界
+        filtered_gdf = self.clip_to_bounds(filtered_gdf)
         
         os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
