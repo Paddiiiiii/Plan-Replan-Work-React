@@ -1,5 +1,5 @@
 from typing import Dict, List, Any, Optional, Tuple
-from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool, RelativePositionFilterTool
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool, RelativePositionFilterTool, DistanceFilterTool, AreaFilterTool
 from context_manager import ContextManager
 from config import LLM_CONFIG
 from utils.llm_utils import call_llm, parse_plan_response
@@ -19,7 +19,9 @@ class WorkAgent:
             "elevation_filter_tool": ElevationFilterTool(),
             "slope_filter_tool": SlopeFilterTool(),
             "vegetation_filter_tool": VegetationFilterTool(),
-            "relative_position_filter_tool": RelativePositionFilterTool()
+            "relative_position_filter_tool": RelativePositionFilterTool(),
+            "distance_filter_tool": DistanceFilterTool(),
+            "area_filter_tool": AreaFilterTool()
         }
 
     def execute_plan(self, plan: Dict) -> Dict[str, Any]:
@@ -144,7 +146,9 @@ class WorkAgent:
             "elevation": "elevation_filter_tool",
             "slope": "slope_filter_tool",
             "vegetation": "vegetation_filter_tool",
-            "relative_position": "relative_position_filter_tool"
+            "relative_position": "relative_position_filter_tool",
+            "distance": "distance_filter_tool",
+            "area": "area_filter_tool"
         }
         
         for step_type, tool_name in type_mapping.items():
@@ -166,7 +170,9 @@ class WorkAgent:
                             "elevation": [],
                             "slope": [],
                             "vegetation": [],
-                            "relative_position": ["reference_point", "reference_direction", "position_types"]
+                            "relative_position": ["reference_point", "reference_direction", "position_types"],
+                            "distance": ["reference_point", "max_distance"],
+                            "area": ["min_area_km2"]
                         }
                         required = param_name in required_params.get(step_type, [])
                         required_text = "必需" if required else "可选"
@@ -309,7 +315,7 @@ class WorkAgent:
         Returns:
             验证结果字典 {"valid": bool, "error": str}
         """
-        valid_tool_types = ["buffer", "elevation", "slope", "vegetation", "relative_position"]
+        valid_tool_types = ["buffer", "elevation", "slope", "vegetation", "relative_position", "distance", "area"]
         required_params = {
             "buffer": ["buffer_distance"],
             "relative_position": ["reference_point", "reference_direction", "position_types"]
@@ -552,9 +558,9 @@ class WorkAgent:
         initial_geojson_path = None  # 跟踪初始GeoJSON文件路径
 
         # 如果第一个步骤需要input_geojson_path，先生成初始GeoJSON
-        # 需要初始GeoJSON的步骤类型：buffer, relative_position, elevation, slope, vegetation
+        # 需要初始GeoJSON的步骤类型：buffer, relative_position, elevation, slope, vegetation, distance, area
         first_step_type = steps[0].get("type") if steps else None
-        needs_initial_geojson = first_step_type in ["buffer", "relative_position", "elevation", "slope", "vegetation"]
+        needs_initial_geojson = first_step_type in ["buffer", "relative_position", "elevation", "slope", "vegetation", "distance", "area"]
         
         if steps and needs_initial_geojson:
             try:

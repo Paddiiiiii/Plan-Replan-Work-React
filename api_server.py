@@ -195,6 +195,9 @@ async def get_tools():
     - elevation_filter_tool: 高程筛选
     - slope_filter_tool: 坡度筛选
     - vegetation_filter_tool: 植被筛选
+    - relative_position_filter_tool: 相对位置筛选
+    - distance_filter_tool: 距离筛选
+    - area_filter_tool: 面积筛选
     """
     tools = {}
     for name, tool in get_orchestrator().work_agent.tools.items():
@@ -410,7 +413,7 @@ async def get_results_list():
         logger.error(f"获取结果文件列表失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取结果文件列表失败: {str(e)}")
 
-@app.get("/api/results/{filename}", tags=["结果文件"])
+@app.get("/api/results/{filename:path}", tags=["结果文件"])
 async def get_result_file(filename: str):
     """
     获取特定结果文件内容
@@ -418,19 +421,23 @@ async def get_result_file(filename: str):
     下载指定的GeoJSON结果文件。
     
     路径参数：
-    - filename: 文件名（如 `buffer_filter_500m_20251223.geojson`）
+    - filename: 文件名（如 `buffer_filter_500m_20251223.geojson`），支持URL编码的中文字符
     
     返回GeoJSON文件内容（Content-Type: application/geo+json）
     """
     try:
+        from urllib.parse import unquote
+        # 解码URL编码的文件名（处理中文字符）
+        decoded_filename = unquote(filename, encoding='utf-8')
+        
         result_dir = PATHS["result_dir"]
-        file_path = result_dir / filename
+        file_path = result_dir / decoded_filename
 
         if not file_path.resolve().is_relative_to(result_dir.resolve()):
             raise HTTPException(status_code=403, detail="访问被拒绝")
 
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
+            raise HTTPException(status_code=404, detail=f"文件 {decoded_filename} 不存在")
 
         if not filename.endswith('.geojson'):
             raise HTTPException(status_code=400, detail="只支持GeoJSON文件")

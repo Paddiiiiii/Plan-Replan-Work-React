@@ -322,6 +322,8 @@ def main():
                             st.session_state.execution_completed = False
                             st.session_state.last_result_data = None
                             st.session_state.current_stage = "input"
+                            # 连续执行两次rerun，确保状态生效
+                            st.rerun()
                             st.rerun()
                     
                     st.info("任务已完成，显示结果如下：")
@@ -523,6 +525,8 @@ def main():
                                             st.session_state.execution_completed = False
                                             st.session_state.last_result_data = None
                                             st.session_state.current_stage = "input"
+                                            # 连续执行两次rerun，确保状态生效
+                                            st.rerun()
                                             st.rerun()
 
                                     if work_result.get("sub_results"):
@@ -835,8 +839,11 @@ def main():
 
                     with st.spinner("正在加载结果文件..."):
                         try:
+                            # URL编码文件名（处理中文字符）
+                            from urllib.parse import quote
+                            encoded_filename = quote(selected_filename, safe='')
                             response = requests.get(
-                                f"{API_URL}/api/results/{selected_filename}",
+                                f"{API_URL}/api/results/{encoded_filename}",
                                 timeout=30
                             )
                             if response.status_code == 200:
