@@ -1,7 +1,7 @@
 from typing import Dict, List, Any, Optional, Tuple
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool, RelativePositionFilterTool, DistanceFilterTool, AreaFilterTool
 from context_manager import ContextManager
-from config import LLM_CONFIG
+from config import LLM_CONFIG, GEO_BOUNDS
 from utils.llm_utils import call_llm, parse_plan_response
 from utils.tool_utils import get_tools_schema_text, prepare_step_input_path
 from utils.geojson_generator import generate_initial_geojson
@@ -552,6 +552,7 @@ class WorkAgent:
         Returns:
             执行结果字典
         """
+        
         results = []
         last_result_path = None
         intermediate_geojson_paths = []  # 跟踪中间步骤保存的geojson文件
@@ -742,15 +743,21 @@ class WorkAgent:
             "elevation": "elevation_filter_tool",
             "slope": "slope_filter_tool",
             "vegetation": "vegetation_filter_tool",
-            "relative_position": "relative_position_filter_tool"
+            "relative_position": "relative_position_filter_tool",
+            "distance": "distance_filter_tool",
+            "area": "area_filter_tool"
         }
 
         # 如果step中直接指定了tool，使用它
         if step.get("tool"):
-            return self._act({
+            result = self._act({
                 "tool": step["tool"],
                 "params": step_params
             })
+            # 如果步骤标记为使用默认值，将标记传递到结果中
+            if step.get("is_default"):
+                result["is_default"] = True
+            return result
 
         # 如果step有type，映射到对应的工具
         if step_type and step_type in type_to_tool:
@@ -771,10 +778,14 @@ class WorkAgent:
                     "error": validated_params["error"]
                 }
             
-            return self._act({
+            result = self._act({
                 "tool": tool_name,
                 "params": validated_params
             })
+            # 如果步骤标记为使用默认值，将标记传递到结果中
+            if step.get("is_default"):
+                result["is_default"] = True
+            return result
 
         # 如果既没有tool也没有type，返回错误
         return {

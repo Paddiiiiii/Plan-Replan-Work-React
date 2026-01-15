@@ -86,9 +86,25 @@ class RelativePositionFilterTool(BaseTool):
     def _get_relative_position(self, geometry: Polygon, ref_lon: float, ref_lat: float, 
                                reference_direction: float, position_config: Dict[str, List[Dict[str, float]]]) -> Optional[str]:
         """获取几何图形的相对位置"""
-        center = geometry.centroid
-        target_lon = center.x
-        target_lat = center.y
+        try:
+            # 检查几何图形是否为空（使用try-except，因为某些情况下is_empty可能触发内部计算）
+            if geometry.is_empty:
+                return None
+        except Exception:
+            # 如果检查is_empty时出错，说明几何图形无效
+            return None
+        
+        try:
+            center = geometry.centroid
+            # 检查centroid是否为空
+            if center.is_empty:
+                return None
+            
+            target_lon = center.x
+            target_lat = center.y
+        except Exception:
+            # 如果访问centroid或坐标时出错，说明几何图形无效
+            return None
         
         # 如果参考点和目标点重合，返回None
         if abs(target_lon - ref_lon) < 1e-9 and abs(target_lat - ref_lat) < 1e-9:
@@ -207,6 +223,14 @@ class RelativePositionFilterTool(BaseTool):
         for idx, row in gdf.iterrows():
             if not isinstance(row.geometry, Polygon):
                 # 跳过非Polygon类型，不在字典中添加
+                continue
+            
+            # 检查几何图形是否为空（使用try-except，因为某些情况下is_empty可能触发内部计算）
+            try:
+                if row.geometry.is_empty:
+                    continue
+            except Exception:
+                # 如果检查is_empty时出错，说明几何图形无效，跳过
                 continue
             
             position = self._get_relative_position(

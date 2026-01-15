@@ -28,9 +28,18 @@ class ElevationFilterTool(BaseTool):
     
     def _get_elevation_from_dem(self, geometry: Polygon, min_elev: Optional[float] = None, max_elev: Optional[float] = None) -> Tuple[bool, Optional[float]]:
         try:
+            # 检查几何图形是否为空
+            if geometry.is_empty:
+                return True, None
+            
             with rasterio.open(str(DEM_PATH)) as src:
                 bounds = geometry.bounds
                 center = geometry.centroid
+                
+                # 检查centroid是否为空
+                if center.is_empty:
+                    return True, None
+                
                 sample_points = [
                     (center.x, center.y),
                     (bounds[0], bounds[1]),

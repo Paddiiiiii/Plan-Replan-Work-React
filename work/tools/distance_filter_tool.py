@@ -117,7 +117,15 @@ class DistanceFilterTool(BaseTool):
             if not isinstance(row.geometry, Polygon):
                 continue
             
+            # 检查几何图形是否为空
+            if row.geometry.is_empty:
+                continue
+            
             center = row.geometry.centroid
+            # 检查centroid是否为空
+            if center.is_empty:
+                continue
+            
             target_lon = center.x
             target_lat = center.y
             

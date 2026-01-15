@@ -50,8 +50,16 @@ class SlopeFilterTool(BaseTool):
                 
                 if tpi_data is None:
                     # 如果无法裁剪，使用采样点方式
+                    # 检查几何图形是否为空
+                    if geometry.is_empty:
+                        return True, None
+                    
                     bounds = geometry.bounds
                     center = geometry.centroid
+                    
+                    # 检查centroid是否为空
+                    if center.is_empty:
+                        return True, None
                     
                     sample_points_ll = [
                         (center.x, center.y),

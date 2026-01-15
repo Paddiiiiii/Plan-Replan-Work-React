@@ -33,6 +33,7 @@ vectorize_model: &vectorize_model
   vector_dimensions: 1024
   max_rate: 30  # 每秒最大30个请求，降低频率避免超限
   time_period: 1.0
+  max_chars: 600  # 保守估计，中文1 token ≈ 1-2字符，4000字符约8000 tokens
   enable_check: false
 vectorizer: *vectorize_model
 

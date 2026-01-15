@@ -21,8 +21,8 @@ from threading import Lock
 logger = logging.getLogger(__name__)
 
 # 最大token数限制（保守估计，中文1 token ≈ 1-2字符，设置400字符确保不超过512 tokens）
-MAX_TOKENS = 512
-MAX_CHARS = 400  # 保守估计，确保不超过512 tokens
+MAX_TOKENS = 1024
+MAX_CHARS = 600  # 保守估计，确保不超过512 tokens
 
 
 @VectorizeModelABC.register("openai")

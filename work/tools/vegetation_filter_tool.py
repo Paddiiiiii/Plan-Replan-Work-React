@@ -75,8 +75,16 @@ class VegetationFilterTool(BaseTool):
                     out_image, out_transform = mask(src, [geometry_transformed], crop=True, filled=False)
                     veg_data = out_image[0].astype("float64")
                 except Exception:
+                    # 检查几何图形是否为空
+                    if geometry.is_empty:
+                        return True, None, None
+                    
                     bounds = geometry.bounds
                     center = geometry.centroid
+                    
+                    # 检查centroid是否为空
+                    if center.is_empty:
+                        return True, None, None
 
                     sample_points_ll = [
                         (center.x, center.y),

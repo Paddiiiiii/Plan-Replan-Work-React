@@ -8,6 +8,7 @@ import time
 import requests
 from typing import Optional, Dict
 import os
+import socket
 from config import GEO_BOUNDS
 
 os.environ.setdefault("PYTHONUTF8", "1")
@@ -26,7 +27,20 @@ try:
 except Exception:
     pass
 
-API_URL = "http://localhost:8000"
+def get_server_ip():
+    """获取本机局域网IP地址"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "localhost"
+
+# 动态获取服务器IP地址
+SERVER_IP = get_server_ip()
+API_URL = f"http://{SERVER_IP}:8000"
 API_TIMEOUT = 1800  # 增加到1800秒（30分钟），支持两轮LLM思考的长时间处理（每轮最长800秒）
 
 def load_geojson(file_path: str):
@@ -92,11 +106,29 @@ def _display_result(sub_result: Dict, plan: Dict):
     
     st.subheader(f"{unit} - 筛选参数")
     filter_params = {}
+    default_tools = []  # 使用默认值的工具列表
+    
+    # 工具名称到中文名称的映射
+    tool_name_map = {
+        "buffer_filter_tool": "缓冲区筛选",
+        "elevation_filter_tool": "高程筛选",
+        "slope_filter_tool": "坡度筛选",
+        "vegetation_filter_tool": "植被筛选",
+        "distance_filter_tool": "距离筛选",
+        "area_filter_tool": "面积筛选",
+        "relative_position_filter_tool": "相对位置筛选"
+    }
     
     for step_result in steps:
         if step_result.get("success"):
             tool_name = step_result.get("tool", "")
             step_params = step_result.get("params", {})
+            is_default = step_result.get("is_default", False)
+            
+            # 如果使用默认值，添加到默认工具列表，不显示详细参数
+            if is_default and tool_name in tool_name_map:
+                default_tools.append(tool_name_map[tool_name])
+                continue
             
             if tool_name == "buffer_filter_tool":
                 buffer_dist = step_params.get("buffer_distance")
@@ -158,11 +190,30 @@ def _display_result(sub_result: Dict, plan: Dict):
                     filter_params["参考方向"] = f"{reference_direction}°"
                 if position_types:
                     filter_params["相对位置类型"] = ", ".join(position_types)
+            elif tool_name == "distance_filter_tool":
+                reference_point = step_params.get("reference_point", {})
+                max_distance = step_params.get("max_distance")
+                if reference_point:
+                    lon = reference_point.get("lon")
+                    lat = reference_point.get("lat")
+                    if lon is not None and lat is not None:
+                        filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                if max_distance is not None:
+                    filter_params["最大距离"] = f"{max_distance} 米"
+            elif tool_name == "area_filter_tool":
+                min_area_km2 = step_params.get("min_area_km2")
+                if min_area_km2 is not None:
+                    filter_params["最小面积"] = f"{min_area_km2} 平方公里"
     
     if filter_params:
         for key, value in filter_params.items():
             st.write(f"**{key}**: {value}")
-    else:
+    
+    # 显示使用默认值的工具汇总信息
+    if default_tools:
+        st.info(f"{'、'.join(default_tools)}工具已通过默认值调用")
+    
+    if not filter_params and not default_tools:
         st.info("无筛选参数信息")
 
 def create_map(gdf: gpd.GeoDataFrame, reference_point: Optional[Dict] = None, reference_direction: Optional[float] = None) -> Optional[folium.Map]:

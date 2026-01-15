@@ -49,7 +49,7 @@ def run_frontend():
             sys.executable, "-m", "streamlit", "run",
             str(frontend_path),
             "--server.port=8501",
-            "--server.address=localhost",
+            "--server.address=0.0.0.0",
             "--server.headless=true",
             "--browser.gatherUsageStats=false",
             "--server.runOnSave=false"
@@ -84,7 +84,22 @@ if __name__ == "__main__":
     api_thread = threading.Thread(target=run_api_server, daemon=True)
     api_thread.start()
     
+    # 获取本机局域网IP地址
+    def get_server_ip():
+        """获取本机局域网IP地址"""
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return "localhost"
+    
+    server_ip = get_server_ip()
     print("✓ 后端API服务启动中: http://localhost:8000")
+    print(f"✓ 后端API服务（局域网）: http://{server_ip}:8000")
     print("✓ API文档: http://localhost:8000/docs")
     time.sleep(3)
     
@@ -93,7 +108,8 @@ if __name__ == "__main__":
     if frontend_process:
         time.sleep(5)
         if frontend_process.poll() is None:
-            print("✓ 前端地址: http://localhost:8501")
+            print(f"✓ 前端地址（本机）: http://localhost:8501")
+            print(f"✓ 前端地址（局域网）: http://{server_ip}:8501")
             print("=" * 60)
             print("按 Ctrl+C 停止服务")
             print("=" * 60)
