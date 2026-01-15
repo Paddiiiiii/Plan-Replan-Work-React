@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KAG 知识图谱可视化 - 增强版</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-item .number {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-item .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        @media (max-width: 1400px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .panel-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-title::before {
+            content: "▸";
+            font-size: 1.2em;
+        }
+        
+        #graph-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+        
+        .text-panel {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .highlighted-text {
+            line-height: 1.8;
+            font-size: 14px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .text-normal {
+            color: #333;
+        }
+        
+        .text-entity {
+            background: linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            display: inline-block;
+            margin: 0 1px;
+        }
+        
+        .text-entity:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+        
+        .text-entity::after {
+            content: attr(data-type);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            margin-bottom: 5px;
+        }
+        
+        .text-entity:hover::after {
+            opacity: 1;
+        }
+        
+        .steps-panel {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+        }
+        
+        .steps-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .step-item {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .step-item:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .step-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .step-description {
+            color: #666;
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+        
+        .step-entities, .step-relations {
+            margin-top: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .entity-tag, .relation-tag {
+            background: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+        
+        .entity-tag:hover, .relation-tag:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .control-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+        
+        .legend-label {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 KAG 知识图谱可视化</h1>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="number" id="node-count">0</span>
+                    <span class="label">实体节点</span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="edge-count">0</span>
+                    <span class="label">关系边</span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="type-count">0</span>
+                    <span class="label">实体类型</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="panel">
+                <div class="panel-title">知识图谱</div>
+                <div class="controls">
+                    <button class="control-btn" onclick="resetView()">重置视图</button>
+                    <button class="control-btn" onclick="fitView()">适应窗口</button>
+                    <button class="control-btn" onclick="togglePhysics()">切换物理引擎</button>
+                </div>
+                <div id="graph-container"></div>
+                <div class="legend" id="legend"></div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">原文高亮</div>
+                <div class="text-panel">
+                    <div class="highlighted-text" id="highlighted-text">
+                        <span class="text-normal">2024年，</span><span class="text-entity" data-entity-id="1" data-type="MilitaryUnit" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">中国人民解放军</span><span class="text-normal">进行了大规模军事</span><span class="text-entity" data-entity-id="3" data-type="Deployment" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">部署</span><span class="text-normal">。主要</span><span class="text-entity" data-entity-id="3" data-type="Deployment" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">部署</span><span class="text-normal">地点包括</span><span class="text-entity" data-entity-id="2" data-type="Location" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">北京</span><span class="text-normal">和</span><span class="text-entity" data-entity-id="5" data-type="Location" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">上海</span><span class="text-normal">。
+</span><span class="text-entity" data-entity-id="4" data-type="MilitaryUnit" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">东部战区</span><span class="text-normal">作为重要组成部分，参与了此次</span><span class="text-entity" data-entity-id="3" data-type="Deployment" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">部署</span><span class="text-normal">行动。此次</span><span class="text-entity" data-entity-id="3" data-type="Deployment" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">部署</span><span class="text-normal">行动由张将军指挥，规模达到200万人。
+</span><span class="text-entity" data-entity-id="3" data-type="Deployment" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">部署</span><span class="text-normal">的目的是加强国防力量，确保国家安全。</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel steps-panel">
+                <div class="panel-title">抽取过程</div>
+                <div class="steps-container" id="steps-container">
+                    
+                <div class="step-item" style="animation-delay: 0.1s">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-name">实体识别 (NER)</div>
+                    </div>
+                    <div class="step-description">从文本中识别出5个实体：中国人民解放军、北京、部署、东部战区、上海</div>
+                    <div class="step-entities"><span class="entity-tag">中国人民解放军 (MilitaryUnit)</span><span class="entity-tag">北京 (Location)</span><span class="entity-tag">部署 (Deployment)</span><span class="entity-tag">东部战区 (MilitaryUnit)</span><span class="entity-tag">上海 (Location)</span></div>
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.2s">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-name">关系抽取</div>
+                    </div>
+                    <div class="step-description">抽取了5条关系，包括执行、部署地点、包含、位于等关系</div>
+                    
+                    <div class="step-relations"><span class="relation-tag">中国人民解放军 --[执行]--> 部署</span><span class="relation-tag">部署 --[部署地点]--> 北京</span><span class="relation-tag">中国人民解放军 --[包含]--> 东部战区</span><span class="relation-tag">东部战区 --[部署地点]--> 上海</span><span class="relation-tag">中国人民解放军 --[位于]--> 北京</span></div>
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.30000000000000004s">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-name">实体标准化</div>
+                    </div>
+                    <div class="step-description">对识别的实体进行标准化处理，确保实体名称和类型的一致性</div>
+                    
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.4s">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-name">图谱构建</div>
+                    </div>
+                    <div class="step-description">构建包含5个节点和5条边的知识图谱，完成知识表示</div>
+                    
+                    
+                </div>
+            
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 图数据
+        const graphData = {
+  "nodes": [
+    {
+      "id": "1",
+      "label": "中国人民解放军",
+      "type": "MilitaryUnit",
+      "color": "#4ECDC4",
+      "properties": {
+        "name": "中国人民解放军",
+        "type": "军队",
+        "strength": "200万"
+      },
+      "size": 26
+    },
+    {
+      "id": "2",
+      "label": "北京",
+      "type": "Location",
+      "color": "#45B7D1",
+      "properties": {
+        "name": "北京",
+        "type": "城市",
+        "province": "北京市"
+      },
+      "size": 26
+    },
+    {
+      "id": "3",
+      "label": "部署",
+      "type": "Deployment",
+      "color": "#FF6B6B",
+      "properties": {
+        "name": "部署",
+        "time": "2024年",
+        "scale": "大规模"
+      },
+      "size": 26
+    },
+    {
+      "id": "4",
+      "label": "东部战区",
+      "type": "MilitaryUnit",
+      "color": "#4ECDC4",
+      "properties": {
+        "name": "东部战区",
+        "type": "战区",
+        "commander": "张将军"
+      },
+      "size": 26
+    },
+    {
+      "id": "5",
+      "label": "上海",
+      "type": "Location",
+      "color": "#45B7D1",
+      "properties": {
+        "name": "上海",
+        "type": "城市",
+        "province": "上海市"
+      },
+      "size": 26
+    }
+  ],
+  "edges": [
+    {
+      "from": "1",
+      "to": "3",
+      "label": "执行",
+      "color": "#3498DB",
+      "properties": {}
+    },
+    {
+      "from": "3",
+      "to": "2",
+      "label": "部署地点",
+      "color": "#1ABC9C",
+      "properties": {}
+    },
+    {
+      "from": "1",
+      "to": "4",
+      "label": "包含",
+      "color": "#E74C3C",
+      "properties": {}
+    },
+    {
+      "from": "4",
+      "to": "5",
+      "label": "部署地点",
+      "color": "#1ABC9C",
+      "properties": {}
+    },
+    {
+      "from": "1",
+      "to": "2",
+      "label": "位于",
+      "color": "#9B59B6",
+      "properties": {}
+    }
+  ],
+  "nodeTypes": [
+    "Deployment",
+    "MilitaryUnit",
+    "Location"
+  ],
+  "relationTypes": [
+    "位于",
+    "执行",
+    "部署地点",
+    "包含"
+  ]
+};
+        const highlightedText = {"original": "2024年，中国人民解放军进行了大规模军事部署。主要部署地点包括北京和上海。\n东部战区作为重要组成部分，参与了此次部署行动。此次部署行动由张将军指挥，规模达到200万人。\n部署的目的是加强国防力量，确保国家安全。", "segments": [{"text": "2024年，", "type": "normal"}, {"text": "中国人民解放军", "type": "entity", "entityName": "中国人民解放军", "entityType": "MilitaryUnit", "entityId": "1", "color": "#FF6B6B"}, {"text": "进行了大规模军事", "type": "normal"}, {"text": "部署", "type": "entity", "entityName": "部署", "entityType": "Deployment", "entityId": "3", "color": "#FF6B6B"}, {"text": "。主要", "type": "normal"}, {"text": "部署", "type": "entity", "entityName": "部署", "entityType": "Deployment", "entityId": "3", "color": "#FF6B6B"}, {"text": "地点包括", "type": "normal"}, {"text": "北京", "type": "entity", "entityName": "北京", "entityType": "Location", "entityId": "2", "color": "#FF6B6B"}, {"text": "和", "type": "normal"}, {"text": "上海", "type": "entity", "entityName": "上海", "entityType": "Location", "entityId": "5", "color": "#FF6B6B"}, {"text": "。\n", "type": "normal"}, {"text": "东部战区", "type": "entity", "entityName": "东部战区", "entityType": "MilitaryUnit", "entityId": "4", "color": "#FF6B6B"}, {"text": "作为重要组成部分，参与了此次", "type": "normal"}, {"text": "部署", "type": "entity", "entityName": "部署", "entityType": "Deployment", "entityId": "3", "color": "#FF6B6B"}, {"text": "行动。此次", "type": "normal"}, {"text": "部署", "type": "entity", "entityName": "部署", "entityType": "Deployment", "entityId": "3", "color": "#FF6B6B"}, {"text": "行动由张将军指挥，规模达到200万人。\n", "type": "normal"}, {"text": "部署", "type": "entity", "entityName": "部署", "entityType": "Deployment", "entityId": "3", "color": "#FF6B6B"}, {"text": "的目的是加强国防力量，确保国家安全。", "type": "normal"}], "entities": {"中国人民解放军": {"type": "MilitaryUnit", "id": "1", "color": "#FF6B6B"}, "北京": {"type": "Location", "id": "2", "color": "#FF6B6B"}, "部署": {"type": "Deployment", "id": "3", "color": "#FF6B6B"}, "东部战区": {"type": "MilitaryUnit", "id": "4", "color": "#FF6B6B"}, "上海": {"type": "Location", "id": "5", "color": "#FF6B6B"}}};
+        
+        // 初始化网络图
+        let network = null;
+        let physicsEnabled = true;
+        
+        function initGraph() {
+            const container = document.getElementById('graph-container');
+            
+            const nodes = new vis.DataSet(graphData.nodes.map(node => ({
+                id: node.id,
+                label: node.label,
+                color: {
+                    background: node.color,
+                    border: '#2B2B2B',
+                    highlight: {
+                        background: node.color,
+                        border: '#000000'
+                    }
+                },
+                size: node.size,
+                font: {
+                    size: 14,
+                    face: 'Microsoft YaHei'
+                },
+                shape: 'box',
+                title: `${node.type}\n${JSON.stringify(node.properties, null, 2)}`
+            })));
+            
+            const edges = new vis.DataSet(graphData.edges.map(edge => ({
+                from: edge.from,
+                to: edge.to,
+                label: edge.label,
+                color: {
+                    color: edge.color,
+                    highlight: edge.color
+                },
+                width: 2,
+                arrows: {
+                    to: {
+                        enabled: true,
+                        type: 'arrow'
+                    }
+                },
+                font: {
+                    size: 12,
+                    face: 'Microsoft YaHei',
+                    align: 'middle'
+                },
+                smooth: {
+                    type: 'cubicBezier',
+                    roundness: 0.4
+                }
+            })));
+            
+            const data = { nodes: nodes, edges: edges };
+            
+            const options = {
+                physics: {
+                    enabled: physicsEnabled,
+                    stabilization: {
+                        iterations: 200
+                    },
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        centralGravity: 0.3,
+                        springLength: 200,
+                        springConstant: 0.04,
+                        damping: 0.09
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 100,
+                    zoomView: true,
+                    dragView: true
+                },
+                nodes: {
+                    borderWidth: 2,
+                    shadow: {
+                        enabled: true,
+                        size: 10,
+                        x: 5,
+                        y: 5
+                    }
+                },
+                edges: {
+                    shadow: {
+                        enabled: true,
+                        size: 5
+                    }
+                }
+            };
+            
+            network = new vis.Network(container, data, options);
+            
+            // 更新统计信息
+            document.getElementById('node-count').textContent = graphData.nodes.length;
+            document.getElementById('edge-count').textContent = graphData.edges.length;
+            document.getElementById('type-count').textContent = graphData.nodeTypes.length;
+            
+            // 创建图例
+            createLegend();
+            
+            // 节点点击事件
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    highlightEntityInText(nodeId);
+                }
+            });
+        }
+        
+        function createLegend() {
+            const legendContainer = document.getElementById('legend');
+            legendContainer.innerHTML = '';
+            
+            graphData.nodeTypes.forEach(type => {
+                const node = graphData.nodes.find(n => n.type === type);
+                if (node) {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background: ${node.color}"></div>
+                        <span class="legend-label">${type}</span>
+                    `;
+                    legendContainer.appendChild(item);
+                }
+            });
+        }
+        
+        function highlightEntityInText(nodeId) {
+            const node = graphData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            
+            // 高亮文本中的实体
+            const textElements = document.querySelectorAll('.text-entity');
+            textElements.forEach(el => {
+                if (el.getAttribute('data-entity-id') === nodeId) {
+                    el.style.background = 'linear-gradient(120deg, #ff6b6b 0%, #ee5a6f 100%)';
+                    el.style.color = 'white';
+                    setTimeout(() => {
+                        el.style.background = '';
+                        el.style.color = '';
+                    }, 2000);
+                }
+            });
+        }
+        
+        function resetView() {
+            if (network) {
+                network.fit();
+            }
+        }
+        
+        function fitView() {
+            if (network) {
+                network.fit({
+                    animation: true
+                });
+            }
+        }
+        
+        function togglePhysics() {
+            physicsEnabled = !physicsEnabled;
+            if (network) {
+                network.setOptions({
+                    physics: {
+                        enabled: physicsEnabled
+                    }
+                });
+            }
+        }
+        
+        // 渲染高亮文本
+        function renderHighlightedText() {
+            if (!highlightedText || !highlightedText.segments) {
+                document.getElementById('highlighted-text').textContent = '暂无原文内容';
+                return;
+            }
+            
+            const container = document.getElementById('highlighted-text');
+            container.innerHTML = '';
+            
+            highlightedText.segments.forEach(segment => {
+                const span = document.createElement('span');
+                if (segment.type === 'entity') {
+                    span.className = 'text-entity';
+                    span.textContent = segment.text;
+                    span.setAttribute('data-entity-id', segment.entityId);
+                    span.setAttribute('data-type', segment.entityType);
+                    span.style.background = `linear-gradient(120deg, ${segment.color}88 0%, ${segment.color}AA 100%)`;
+                    span.onclick = () => {
+                        // 点击实体时高亮图中的节点
+                        if (network) {
+                            network.selectNodes([segment.entityId]);
+                            network.focus(segment.entityId, {
+                                scale: 1.5,
+                                animation: true
+                            });
+                        }
+                    };
+                } else {
+                    span.className = 'text-normal';
+                    span.textContent = segment.text;
+                }
+                container.appendChild(span);
+            });
+        }
+        
+        // 初始化
+        window.addEventListener('DOMContentLoaded', function() {
+            initGraph();
+            renderHighlightedText();
+        });
+    </script>
+</body>
+</html>

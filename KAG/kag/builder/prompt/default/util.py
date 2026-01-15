@@ -55,6 +55,18 @@ def load_knowIE_data(respond, lang="en"):
 
 
 def load_NER_data(respond):
+    # 如果respond已经是列表，直接返回
+    if isinstance(respond, list):
+        return respond
+    
+    # 如果respond是字典，尝试转换为列表
+    if isinstance(respond, dict):
+        return [respond]
+    
+    # 如果respond是字符串，进行解析
+    if not isinstance(respond, str):
+        raise ValueError(f"the output NER format is invalid, expected str/list/dict, got {type(respond)}: {respond}")
+    
     try:
         extract_ret_str = respond.replace(
             'Before" trilogy,', 'Before trilogy",'
@@ -77,7 +89,7 @@ def load_NER_data(respond):
                 extract_ret_str = extract_ret_str.strip() + "}]"
                 extract_ret = json.loads(extract_ret_str)
             except:
-                raise ValueError("the output NER str is invalid: " + respond)
+                raise ValueError("the output NER str is invalid: " + str(respond))
     return extract_ret
 
 

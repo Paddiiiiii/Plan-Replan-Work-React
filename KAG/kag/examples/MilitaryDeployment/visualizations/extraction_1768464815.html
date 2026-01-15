@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KAG 知识图谱可视化 - 增强版</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-item .number {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-item .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        @media (max-width: 1400px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .panel-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-title::before {
+            content: "▸";
+            font-size: 1.2em;
+        }
+        
+        #graph-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+        
+        .text-panel {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .highlighted-text {
+            line-height: 1.8;
+            font-size: 14px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .text-normal {
+            color: #333;
+        }
+        
+        .text-entity {
+            background: linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            display: inline-block;
+            margin: 0 1px;
+        }
+        
+        .text-entity:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+        
+        .text-entity::after {
+            content: attr(data-type);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            margin-bottom: 5px;
+        }
+        
+        .text-entity:hover::after {
+            opacity: 1;
+        }
+        
+        .steps-panel {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+        }
+        
+        .steps-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .step-item {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .step-item:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .step-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .step-description {
+            color: #666;
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+        
+        .step-entities, .step-relations {
+            margin-top: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .entity-tag, .relation-tag {
+            background: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+        
+        .entity-tag:hover, .relation-tag:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .control-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+        
+        .legend-label {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 KAG 知识图谱可视化</h1>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="number" id="node-count">0</span>
+                    <span class="label">实体节点</span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="edge-count">0</span>
+                    <span class="label">关系边</span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="type-count">0</span>
+                    <span class="label">实体类型</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="panel">
+                <div class="panel-title">知识图谱</div>
+                <div class="controls">
+                    <button class="control-btn" onclick="resetView()">重置视图</button>
+                    <button class="control-btn" onclick="fitView()">适应窗口</button>
+                    <button class="control-btn" onclick="togglePhysics()">切换物理引擎</button>
+                </div>
+                <div id="graph-container"></div>
+                <div class="legend" id="legend"></div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">原文高亮</div>
+                <div class="text-panel">
+                    <div class="highlighted-text" id="highlighted-text">
+                        <span class="text-normal">在现代战场上，兵种在不同战术形式下的相对位置具有明确的规定，以确保各兵种的最大战术效能。在进攻形式下，兵种部署的目的是突破敌人防线并迅速推进。步兵通常位于最前方，处于整个队形的最前端，直接向敌人阵地推进，承担冲锋和占领敌方阵地的任务。紧随步兵之后的是坦克，通常部署在步兵的后方或稍偏两侧，负责为步兵提供火力支援并突破敌方的防线。炮兵通常部署在后方，位于队形的中央或偏后的位置，提供远程火力支援，用于打击敌方的阵地和重武器。航空兵则位于空中，通常处于整个战场的上空，提供空中打击和侦察，压制敌方空防并摧毁敌方后方的补给线和指挥设施。通信兵则部署在指挥中心，通常位于队伍的后方或侧翼，确保前线部队与指挥中心之间的信息传递流畅，保证指挥系统的有效运作。
+</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel steps-panel">
+                <div class="panel-title">抽取过程</div>
+                <div class="steps-container" id="steps-container">
+                    
+                <div class="step-item" style="animation-delay: 0.1s">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-name">实体识别 (NER)</div>
+                    </div>
+                    <div class="step-description">识别出 1 个实体</div>
+                    <div class="step-entities"><span class="entity-tag">用户输入 (Chunk)</span></div>
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.2s">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-name">关系抽取</div>
+                    </div>
+                    <div class="step-description">抽取了 0 条关系</div>
+                    
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.30000000000000004s">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-name">图谱构建</div>
+                    </div>
+                    <div class="step-description">构建包含 1 个节点和 0 条边的知识图谱</div>
+                    
+                    
+                </div>
+            
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 图数据
+        const graphData = {
+  "nodes": [
+    {
+      "id": "17c27f87-5e2a-4dfb-a7c3-14910273f7a1",
+      "label": "用户输入",
+      "type": "Chunk",
+      "color": "#FF6B6B",
+      "properties": {
+        "id": "17c27f87-5e2a-4dfb-a7c3-14910273f7a1",
+        "name": "用户输入",
+        "content": "用户输入\n在现代战场上，兵种在不同战术形式下的相对位置具有明确的规定，以确保各兵种的最大战术效能。在进攻形式下，兵种部署的目的是突破敌人防线并迅速推进。步兵通常位于最前方，处于整个队形的最前端，直接向敌人阵地推进，承担冲锋和占领敌方阵地的任务。紧随步兵之后的是坦克，通常部署在步兵的后方或稍偏两侧，负责为步兵提供火力支援并突破敌方的防线。炮兵通常部署在后方，位于队形的中央或偏后的位置，提供远程火力支援，用于打击敌方的阵地和重武器。航空兵则位于空中，通常处于整个战场的上空，提供空中打击和侦察，压制敌方空防并摧毁敌方后方的补给线和指挥设施。通信兵则部署在指挥中心，通常位于队伍的后方或侧翼，确保前线部队与指挥中心之间的信息传递流畅，保证指挥系统的有效运作。\n"
+      },
+      "size": 26
+    }
+  ],
+  "edges": [],
+  "nodeTypes": [
+    "Chunk"
+  ],
+  "relationTypes": []
+};
+        const highlightedText = {"original": "在现代战场上，兵种在不同战术形式下的相对位置具有明确的规定，以确保各兵种的最大战术效能。在进攻形式下，兵种部署的目的是突破敌人防线并迅速推进。步兵通常位于最前方，处于整个队形的最前端，直接向敌人阵地推进，承担冲锋和占领敌方阵地的任务。紧随步兵之后的是坦克，通常部署在步兵的后方或稍偏两侧，负责为步兵提供火力支援并突破敌方的防线。炮兵通常部署在后方，位于队形的中央或偏后的位置，提供远程火力支援，用于打击敌方的阵地和重武器。航空兵则位于空中，通常处于整个战场的上空，提供空中打击和侦察，压制敌方空防并摧毁敌方后方的补给线和指挥设施。通信兵则部署在指挥中心，通常位于队伍的后方或侧翼，确保前线部队与指挥中心之间的信息传递流畅，保证指挥系统的有效运作。\n", "segments": [{"text": "在现代战场上，兵种在不同战术形式下的相对位置具有明确的规定，以确保各兵种的最大战术效能。在进攻形式下，兵种部署的目的是突破敌人防线并迅速推进。步兵通常位于最前方，处于整个队形的最前端，直接向敌人阵地推进，承担冲锋和占领敌方阵地的任务。紧随步兵之后的是坦克，通常部署在步兵的后方或稍偏两侧，负责为步兵提供火力支援并突破敌方的防线。炮兵通常部署在后方，位于队形的中央或偏后的位置，提供远程火力支援，用于打击敌方的阵地和重武器。航空兵则位于空中，通常处于整个战场的上空，提供空中打击和侦察，压制敌方空防并摧毁敌方后方的补给线和指挥设施。通信兵则部署在指挥中心，通常位于队伍的后方或侧翼，确保前线部队与指挥中心之间的信息传递流畅，保证指挥系统的有效运作。\n", "type": "normal"}], "entities": {}};
+        
+        // 初始化网络图
+        let network = null;
+        let physicsEnabled = true;
+        
+        function initGraph() {
+            const container = document.getElementById('graph-container');
+            
+            const nodes = new vis.DataSet(graphData.nodes.map(node => ({
+                id: node.id,
+                label: node.label,
+                color: {
+                    background: node.color,
+                    border: '#2B2B2B',
+                    highlight: {
+                        background: node.color,
+                        border: '#000000'
+                    }
+                },
+                size: node.size,
+                font: {
+                    size: 14,
+                    face: 'Microsoft YaHei'
+                },
+                shape: 'box',
+                title: `${node.type}\n${JSON.stringify(node.properties, null, 2)}`
+            })));
+            
+            const edges = new vis.DataSet(graphData.edges.map(edge => ({
+                from: edge.from,
+                to: edge.to,
+                label: edge.label,
+                color: {
+                    color: edge.color,
+                    highlight: edge.color
+                },
+                width: 2,
+                arrows: {
+                    to: {
+                        enabled: true,
+                        type: 'arrow'
+                    }
+                },
+                font: {
+                    size: 12,
+                    face: 'Microsoft YaHei',
+                    align: 'middle'
+                },
+                smooth: {
+                    type: 'cubicBezier',
+                    roundness: 0.4
+                }
+            })));
+            
+            const data = { nodes: nodes, edges: edges };
+            
+            const options = {
+                physics: {
+                    enabled: physicsEnabled,
+                    stabilization: {
+                        iterations: 200
+                    },
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        centralGravity: 0.3,
+                        springLength: 200,
+                        springConstant: 0.04,
+                        damping: 0.09
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 100,
+                    zoomView: true,
+                    dragView: true
+                },
+                nodes: {
+                    borderWidth: 2,
+                    shadow: {
+                        enabled: true,
+                        size: 10,
+                        x: 5,
+                        y: 5
+                    }
+                },
+                edges: {
+                    shadow: {
+                        enabled: true,
+                        size: 5
+                    }
+                }
+            };
+            
+            network = new vis.Network(container, data, options);
+            
+            // 更新统计信息
+            document.getElementById('node-count').textContent = graphData.nodes.length;
+            document.getElementById('edge-count').textContent = graphData.edges.length;
+            document.getElementById('type-count').textContent = graphData.nodeTypes.length;
+            
+            // 创建图例
+            createLegend();
+            
+            // 节点点击事件
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    highlightEntityInText(nodeId);
+                }
+            });
+        }
+        
+        function createLegend() {
+            const legendContainer = document.getElementById('legend');
+            legendContainer.innerHTML = '';
+            
+            graphData.nodeTypes.forEach(type => {
+                const node = graphData.nodes.find(n => n.type === type);
+                if (node) {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background: ${node.color}"></div>
+                        <span class="legend-label">${type}</span>
+                    `;
+                    legendContainer.appendChild(item);
+                }
+            });
+        }
+        
+        function highlightEntityInText(nodeId) {
+            const node = graphData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            
+            // 高亮文本中的实体
+            const textElements = document.querySelectorAll('.text-entity');
+            textElements.forEach(el => {
+                if (el.getAttribute('data-entity-id') === nodeId) {
+                    el.style.background = 'linear-gradient(120deg, #ff6b6b 0%, #ee5a6f 100%)';
+                    el.style.color = 'white';
+                    setTimeout(() => {
+                        el.style.background = '';
+                        el.style.color = '';
+                    }, 2000);
+                }
+            });
+        }
+        
+        function resetView() {
+            if (network) {
+                network.fit();
+            }
+        }
+        
+        function fitView() {
+            if (network) {
+                network.fit({
+                    animation: true
+                });
+            }
+        }
+        
+        function togglePhysics() {
+            physicsEnabled = !physicsEnabled;
+            if (network) {
+                network.setOptions({
+                    physics: {
+                        enabled: physicsEnabled
+                    }
+                });
+            }
+        }
+        
+        // 渲染高亮文本
+        function renderHighlightedText() {
+            if (!highlightedText || !highlightedText.segments) {
+                document.getElementById('highlighted-text').textContent = '暂无原文内容';
+                return;
+            }
+            
+            const container = document.getElementById('highlighted-text');
+            container.innerHTML = '';
+            
+            highlightedText.segments.forEach(segment => {
+                const span = document.createElement('span');
+                if (segment.type === 'entity') {
+                    span.className = 'text-entity';
+                    span.textContent = segment.text;
+                    span.setAttribute('data-entity-id', segment.entityId);
+                    span.setAttribute('data-type', segment.entityType);
+                    span.style.background = `linear-gradient(120deg, ${segment.color}88 0%, ${segment.color}AA 100%)`;
+                    span.onclick = () => {
+                        // 点击实体时高亮图中的节点
+                        if (network) {
+                            network.selectNodes([segment.entityId]);
+                            network.focus(segment.entityId, {
+                                scale: 1.5,
+                                animation: true
+                            });
+                        }
+                    };
+                } else {
+                    span.className = 'text-normal';
+                    span.textContent = segment.text;
+                }
+                container.appendChild(span);
+            });
+        }
+        
+        // 初始化
+        window.addEventListener('DOMContentLoaded', function() {
+            initGraph();
+            renderHighlightedText();
+        });
+    </script>
+</body>
+</html>

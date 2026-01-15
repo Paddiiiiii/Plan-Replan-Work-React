@@ -1,11 +1,19 @@
 from pyvis.network import Network
 import textwrap
+from typing import Optional
 
 from kag.builder.model.sub_graph import SubGraph
+from kag.builder.model.chunk import Chunk
 
 
 def visualize_graph(
-    subgraph: SubGraph, output_path: str = "document_graph", format: str = "html"
+    subgraph: SubGraph, 
+    output_path: str = "document_graph", 
+    format: str = "html",
+    enhanced: bool = False,
+    source_text: Optional[str] = None,
+    source_chunk: Optional[Chunk] = None,
+    extraction_steps: Optional[list] = None,
 ):
     """
     Visualize the SubGraph using Pyvis and save it as an interactive HTML file.
@@ -14,7 +22,26 @@ def visualize_graph(
         subgraph: The SubGraph to visualize
         output_path: Path where to save the output file (without extension)
         format: Output format, currently only supports 'html'
+        enhanced: If True, use enhanced visualization with source text highlighting and extraction steps
+        source_text: Original text content (for enhanced mode)
+        source_chunk: Original Chunk object (for enhanced mode)
+        extraction_steps: List of extraction steps (for enhanced mode)
     """
+    # 如果启用增强模式，使用新的可视化工具
+    if enhanced:
+        try:
+            from kag.builder.component.reader.enhanced_graph_visualizer import visualize_enhanced_graph
+            return visualize_enhanced_graph(
+                subgraph=subgraph,
+                source_text=source_text,
+                source_chunk=source_chunk,
+                extraction_steps=extraction_steps,
+                output_path=output_path,
+            )
+        except ImportError:
+            print("[WARNING] 增强可视化模块未找到，使用标准可视化")
+        except Exception as e:
+            print(f"[WARNING] 增强可视化失败: {e}，使用标准可视化")
     # 创建网络图
     net = Network(
         notebook=True,

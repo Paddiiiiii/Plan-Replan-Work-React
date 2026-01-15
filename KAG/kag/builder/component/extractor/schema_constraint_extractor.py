@@ -119,7 +119,21 @@ class SchemaConstraintExtractor(ExtractorABC):
                         "properties": item.properties,
                     }
                 )
+        # 处理ner_result可能为None的情况
+        if ner_result is None:
+            logger.warning(f"NER result is None for passage: {passage[:100]}...")
+            return output
+        
+        # 确保ner_result是可迭代的
+        if not isinstance(ner_result, (list, tuple)):
+            logger.warning(f"NER result is not a list/tuple, got {type(ner_result)}: {ner_result}")
+            return output
+        
         for item in ner_result:
+            # 处理item可能不是字典的情况
+            if not isinstance(item, dict):
+                logger.debug(f"Skipping non-dict item in NER result: {item}")
+                continue
             name = item.get("name", None)
             category = item.get("category", None)
             if name is None or category is None:
