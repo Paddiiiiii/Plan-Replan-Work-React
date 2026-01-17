@@ -1390,32 +1390,73 @@ def main():
                     import tempfile
                     import os
                     
-                    # 创建网络图
+                    # 创建网络图 - 使用深色背景以突出彩色节点
                     net = Network(
                         height="600px",
                         width="100%",
-                        bgcolor="#222222",
+                        bgcolor="#1a1a2e",  # 深蓝黑色背景，更炫酷
                         font_color="white",
                         directed=True
                     )
                     
-                    # 实体类型颜色映射
-                    entity_type_colors = {
-                        "MilitaryUnit": "#FF6B6B",
-                        "TerrainFeature": "#4ECDC4",
-                        "Weapon": "#FFE66D",
-                        "Obstacle": "#95E1D3",
-                        "DefensePosition": "#F38181",
-                        "CombatPosition": "#AA96DA",
-                        "UnitOrganization": "#FCBAD3",
-                        "CombatTask": "#A8E6CF",
-                        "FireSupport": "#FFD3A5",
-                        "ObservationPost": "#FD9853",
-                        "KillZone": "#A8DADC",
-                        "ObstacleBelt": "#457B9D",
-                        "SupportPoint": "#E63946",
-                        "ApproachRoute": "#F1FAEE"
+                    # 炫酷的关系类型配色方案（高对比度，确保文字清晰）
+                    # 使用现代渐变色系，每个关系类型都有独特的颜色
+                    relation_type_colors = {
+                        # 主要关系类型 - 使用鲜艳但对比度高的颜色
+                        "位于": "#FF6B9D",  # 粉红
+                        "包含": "#4ECDC4",  # 青色
+                        "相邻": "#95E1D3",  # 薄荷绿
+                        "连接": "#FECA57",  # 金黄色
+                        "控制": "#48DBFB",  # 亮蓝色
+                        "支持": "#FF9FF3",  # 粉紫色
+                        "攻击": "#54A0FF",  # 蓝色
+                        "防御": "#5F27CD",  # 紫色
+                        "部署": "#00D2D3",  # 青绿色
+                        "指挥": "#FF6348",  # 橙红色
+                        "隶属": "#FFA502",  # 橙色
+                        "协同": "#A55EEA",  # 紫罗兰
+                        "依赖": "#26DE81",  # 绿色
+                        "影响": "#FD79A8",  # 粉红色
+                        "关联": "#FDCB6E",  # 黄色
+                        "组成": "#6C5CE7",  # 靛蓝色
+                        "属于": "#00B894",  # 翠绿色
+                        "执行": "#E17055",  # 珊瑚色
+                        "负责": "#74B9FF",  # 天蓝色
+                        "监控": "#A29BFE",  # 淡紫色
                     }
+                    
+                    # 收集所有关系类型并分配颜色
+                    all_relation_types = sorted(set([str(e.label) for e in filtered_edges if e.label]))
+                    relation_color_map = {}
+                    default_colors = [
+                        "#FF6B9D", "#4ECDC4", "#95E1D3", "#FECA57", "#48DBFB",
+                        "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF6348",
+                        "#FFA502", "#A55EEA", "#26DE81", "#FD79A8", "#FDCB6E",
+                        "#6C5CE7", "#00B894", "#E17055", "#74B9FF", "#A29BFE",
+                        "#FF7675", "#55EFC4", "#81ECEC", "#FAB1A0", "#E17055"
+                    ]
+                    
+                    for idx, rel_type in enumerate(all_relation_types):
+                        if rel_type in relation_type_colors:
+                            relation_color_map[rel_type] = relation_type_colors[rel_type]
+                        else:
+                            # 为未定义的关系类型分配颜色
+                            relation_color_map[rel_type] = default_colors[idx % len(default_colors)]
+                    
+                    # 统计每个节点参与的关系类型（用于确定节点颜色）
+                    node_relation_counts = {}  # {node_id: {relation_type: count}}
+                    for edge in filtered_edges:
+                        source = str(edge.from_id)
+                        target = str(edge.to_id)
+                        relation_type = str(edge.label) if edge.label else "Unknown"
+                        
+                        if source not in node_relation_counts:
+                            node_relation_counts[source] = {}
+                        if target not in node_relation_counts:
+                            node_relation_counts[target] = {}
+                        
+                        node_relation_counts[source][relation_type] = node_relation_counts[source].get(relation_type, 0) + 1
+                        node_relation_counts[target][relation_type] = node_relation_counts[target].get(relation_type, 0) + 1
                     
                     # 添加节点（使用筛选后的节点）
                     entity_map = {}
@@ -1423,7 +1464,15 @@ def main():
                         entity_id = str(node.id)
                         entity_name = str(node.name) if node.name else entity_id
                         entity_type = str(node.label) if node.label else "Unknown"
-                        color = entity_type_colors.get(entity_type, "#888888")
+                        
+                        # 根据节点参与的主要关系类型确定颜色
+                        if entity_id in node_relation_counts and node_relation_counts[entity_id]:
+                            # 找到最常见的关系类型
+                            main_relation = max(node_relation_counts[entity_id].items(), key=lambda x: x[1])[0]
+                            node_color = relation_color_map.get(main_relation, "#888888")
+                        else:
+                            # 如果没有关系，使用默认颜色
+                            node_color = "#888888"
                         
                         # 构建节点标题（显示详细信息）
                         title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
@@ -1432,20 +1481,36 @@ def main():
                             for key, value in list(node.properties.items())[:5]:  # 只显示前5个属性
                                 title += f"<br>  {key}: {value}"
                         
+                        # 设置节点样式：使用渐变色边框，内部填充色，白色文字
                         net.add_node(
                             entity_id,
                             label=entity_name[:20],  # 限制标签长度
                             title=title,
-                            color=color,
-                            size=20
+                            color={
+                                "background": node_color,
+                                "border": node_color,
+                                "highlight": {
+                                    "background": node_color,
+                                    "border": "#FFFFFF"
+                                },
+                                "hover": {
+                                    "background": node_color,
+                                    "border": "#FFFFFF"
+                                }
+                            },
+                            font={"color": "#FFFFFF", "size": 14, "face": "Arial"},
+                            size=25,
+                            borderWidth=3,
+                            borderWidthSelected=5
                         )
                         entity_map[entity_id] = node
                     
-                    # 添加边（使用筛选后的边）
+                    # 添加边（使用筛选后的边，根据关系类型设置颜色）
                     for edge in filtered_edges:
                         source = str(edge.from_id)
                         target = str(edge.to_id)
                         relation_type = str(edge.label) if edge.label else "Unknown"
+                        edge_color = relation_color_map.get(relation_type, "#888888")
                         
                         if source in entity_map and target in entity_map:
                             net.add_edge(
@@ -1453,8 +1518,21 @@ def main():
                                 target,
                                 label=relation_type[:15],  # 限制标签长度
                                 title=relation_type,
-                                color="#888888",
-                                width=2
+                                color={
+                                    "color": edge_color,
+                                    "highlight": "#FFFFFF",
+                                    "hover": "#FFFFFF"
+                                },
+                                width=3,
+                                arrows={
+                                    "to": {
+                                        "enabled": True,
+                                        "scaleFactor": 1.2,
+                                        "type": "arrow"
+                                    }
+                                },
+                                font={"color": edge_color, "size": 12, "align": "middle"},
+                                smooth={"type": "curvedCW", "roundness": 0.2}
                             )
                     
                     # 配置物理引擎 - 先稳定布局，然后禁用让图保持静止
