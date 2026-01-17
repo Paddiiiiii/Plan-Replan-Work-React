@@ -337,7 +337,7 @@ def main():
         if "current_stage" not in st.session_state:
             st.session_state.current_stage = "input"
         if "task_input" not in st.session_state:
-            st.session_state.task_input = "我方现在正在进攻，步兵部署在118.5,31.5位置，战场正方向为110°（正北方向为0°），筛选出坦克的部署位置"
+            st.session_state.task_input = "进攻阶段，敌方步兵部署在118.5,31.5位置，战场正方向为110°（正北方向为0°），筛选出坦克的部署位置"
         if "execution_completed" not in st.session_state:
             st.session_state.execution_completed = False
 
@@ -1242,6 +1242,115 @@ def main():
 
             else:
                 st.info("没有数据可显示。请调整筛选条件或确保checkpoint文件存在。")
+
+            # 在实体关系图下方显示节点和关系对应的原文
+            if filtered_entities or filtered_relations:
+                st.markdown("---")
+                st.subheader("节点和关系对应的原文")
+                
+                # 提取原文信息
+                def extract_source_text(item, item_type="节点"):
+                    """从节点或关系中提取原文信息"""
+                    source_texts = []
+                    properties = item.get("properties", {})
+                    
+                    # 常见的原文字段
+                    text_fields = ["desc", "description", "content", "text", "ruleContent", "ruleName"]
+                    
+                    for field in text_fields:
+                        if field in properties:
+                            value = properties[field]
+                            if value and isinstance(value, str) and value.strip():
+                                source_texts.append({
+                                    "field": field,
+                                    "text": value
+                                })
+                    
+                    # 如果没有找到常见的原文字段，尝试显示所有文本类型的属性
+                    if not source_texts:
+                        for key, value in properties.items():
+                            if isinstance(value, str) and len(value) > 10:  # 只显示较长的文本
+                                source_texts.append({
+                                    "field": key,
+                                    "text": value
+                                })
+                    
+                    return source_texts
+                
+                # 显示节点原文
+                if filtered_entities:
+                    with st.expander(f"📝 节点原文 ({len(filtered_entities)} 个)", expanded=False):
+                        for idx, entity in enumerate(filtered_entities, 1):
+                            entity_name = entity.get("name", entity.get("id", f"节点{idx}"))
+                            entity_type = entity.get("type", "Unknown")
+                            source_texts = extract_source_text(entity, "节点")
+                            
+                            if source_texts:
+                                st.markdown(f"**{idx}. {entity_name}** ({entity_type})")
+                                for source_info in source_texts:
+                                    field_name = source_info["field"]
+                                    text = source_info["text"]
+                                    # 限制显示长度，避免过长
+                                    if len(text) > 500:
+                                        preview_text = text[:100].replace("\n", " ")
+                                        with st.expander(f"  - {field_name}: {preview_text}...", expanded=False):
+                                            st.text_area(
+                                                f"{field_name} 原文",
+                                                value=text,
+                                                height=min(200, max(100, len(text) // 10)),
+                                                key=f"node_{idx}_{field_name}",
+                                                label_visibility="collapsed"
+                                            )
+                                    else:
+                                        st.markdown(f"  - **{field_name}**:")
+                                        st.text(text)
+                                st.markdown("---")
+                            else:
+                                # 如果没有原文，显示基本信息
+                                st.markdown(f"**{idx}. {entity_name}** ({entity_type}) - 无原文信息")
+                                st.markdown("---")
+                
+                # 显示关系原文
+                if filtered_relations:
+                    with st.expander(f"🔗 关系原文 ({len(filtered_relations)} 个)", expanded=False):
+                        for idx, relation in enumerate(filtered_relations, 1):
+                            source_id = relation.get("source", "")
+                            target_id = relation.get("target", "")
+                            relation_type = relation.get("type", "Unknown")
+                            
+                            # 获取源节点和目标节点的名称
+                            source_entity = next((e for e in filtered_entities if e.get("id") == source_id), None)
+                            target_entity = next((e for e in filtered_entities if e.get("id") == target_id), None)
+                            
+                            source_name = source_entity.get("name", source_id) if source_entity else source_id
+                            target_name = target_entity.get("name", target_id) if target_entity else target_id
+                            
+                            source_texts = extract_source_text(relation, "关系")
+                            
+                            if source_texts:
+                                st.markdown(f"**{idx}. {source_name} --[{relation_type}]--> {target_name}**")
+                                for source_info in source_texts:
+                                    field_name = source_info["field"]
+                                    text = source_info["text"]
+                                    # 限制显示长度，避免过长
+                                    if len(text) > 500:
+                                        preview_text = text[:100].replace("\n", " ")
+                                        with st.expander(f"  - {field_name}: {preview_text}...", expanded=False):
+                                            st.text_area(
+                                                f"{field_name} 原文",
+                                                value=text,
+                                                height=min(200, max(100, len(text) // 10)),
+                                                key=f"relation_{idx}_{field_name}",
+                                                label_visibility="collapsed"
+                                            )
+                                    else:
+                                        st.markdown(f"  - **{field_name}**:")
+                                        st.text(text)
+                                st.markdown("---")
+                            else:
+                                # 如果没有原文，显示基本信息
+                                st.markdown(f"**{idx}. {source_name} --[{relation_type}]--> {target_name}** - 无原文信息")
+                                st.markdown("---")
 
             # 节点详情面板
             if st.session_state.selected_node:

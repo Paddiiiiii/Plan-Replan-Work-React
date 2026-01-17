@@ -1,5 +1,5 @@
 ========================================
-KAG 知识抽取系统 - 快速启动指南
+知识抽取系统 - 快速启动指南
 ========================================
 
 ⚠️ 重要提示：
@@ -23,14 +23,16 @@ Linux/Mac:
 ----------------------------------------
 打开命令行，进入此目录，然后运行:
 
-   python -m streamlit run kag_extraction_frontend.py
+   python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
 
    或者（如果 streamlit 在 PATH 中）:
-   streamlit run kag_extraction_frontend.py
+   streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
 
 方式3: 使用完整路径
 ----------------------------------------
-streamlit run KAG/kag/examples/MilitaryDeployment/kag_extraction_frontend.py
+streamlit run kag/examples/MilitaryDeployment/kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
+
+注意: --server.address=0.0.0.0 允许局域网访问
 
 ========================================
 使用步骤:

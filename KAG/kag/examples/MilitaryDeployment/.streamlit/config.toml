@@ -1,0 +1,19 @@
+# Streamlit配置文件
+# KAG知识抽取系统 - 端口配置
+
+[server]
+# 设置默认端口为9501，避免与外层系统的8501冲突
+port = 9501
+address = "localhost"
+
+[browser]
+# 不自动打开浏览器（可选）
+gatherUsageStats = false
+
+[theme]
+# 主题配置（可选）
+primaryColor = "#667eea"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"

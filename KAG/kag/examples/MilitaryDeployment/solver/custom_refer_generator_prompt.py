@@ -1,5 +1,5 @@
 """
-自定义的KAG问答Prompt
+自定义的问答Prompt
 要求只回答知识库中的信息，不进行延伸和计算
 """
 from typing import List

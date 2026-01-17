@@ -1,6 +1,6 @@
 """
-KAG推理问答接口包装器
-用于外层系统调用KAG推理能力
+推理问答接口包装器
+用于外层系统调用推理能力
 """
 import logging
 import sys
@@ -14,14 +14,14 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 class KAGSolverWrapper:
-    """KAG推理问答接口包装器"""
+    """推理问答接口包装器"""
     
     def __init__(self, project_path: Optional[str] = None):
         """
-        初始化KAG推理器
+        初始化推理器
         
         Args:
-            project_path: KAG项目路径，默认为当前目录（MilitaryDeployment）
+            project_path: 项目路径，默认为当前目录（MilitaryDeployment）
         """
         if project_path is None:
             # 默认使用当前目录（MilitaryDeployment项目目录）
@@ -38,14 +38,14 @@ class KAGSolverWrapper:
             return
         
         try:
-            # 添加KAG路径
-            # self.project_path = KAG/kag/examples/MilitaryDeployment
-            # parent.parent.parent = KAG
-            kag_path = self.project_path.parent.parent.parent
-            if str(kag_path) not in sys.path:
-                sys.path.insert(0, str(kag_path))
+            # 添加项目路径
+            # self.project_path = kag/examples/MilitaryDeployment
+            # parent.parent.parent = 项目根目录
+            project_path = self.project_path.parent.parent.parent
+            if str(project_path) not in sys.path:
+                sys.path.insert(0, str(project_path))
             
-            # 导入KAG模块
+            # 导入模块
             from kag.common.registry import import_modules_from_path
             from kag.common.conf import KAG_CONFIG
             from kag.interface import SolverPipelineABC
@@ -96,18 +96,18 @@ class KAGSolverWrapper:
                 # 我们将在query方法中处理
                 
                 self._initialized = True
-                logger.info("KAG推理器初始化成功")
+                logger.info("推理器初始化成功")
             finally:
                 os.chdir(original_cwd)
                 
         except Exception as e:
-            logger.error(f"KAG推理器初始化失败: {e}", exc_info=True)
+            logger.error(f"推理器初始化失败: {e}", exc_info=True)
             self._solver = None
             self._initialized = True  # 标记为已初始化，避免重复尝试
     
     def query(self, question: str) -> Dict:
         """
-        使用KAG推理引擎回答问题（同步版本）
+        使用推理引擎回答问题（同步版本）
         
         Args:
             question: 用户问题
@@ -118,13 +118,13 @@ class KAGSolverWrapper:
         self._init_solver()
         
         if self._solver is None:
-            logger.warning("KAG推理器未初始化，返回空结果")
+            logger.warning("推理器未初始化，返回空结果")
             return {
                 "answer": "",
                 "input_query": question,
                 "tasks": [],
                 "references": [],
-                "error": "KAG推理器未初始化"
+                "error": "推理器未初始化"
             }
         
         try:
@@ -197,7 +197,7 @@ class KAGSolverWrapper:
                     logger.debug(f"从context提取tasks失败: {e}")
             
             # 标准化返回格式
-            # KAG的返回格式通常是字符串（答案）
+            # 返回格式通常是字符串（答案）
             answer = ""
             if isinstance(result, str):
                 answer = result
@@ -214,7 +214,7 @@ class KAGSolverWrapper:
                 "raw_result": result
             }
         except Exception as e:
-            logger.error(f"KAG推理查询失败: {e}", exc_info=True)
+            logger.error(f"推理查询失败: {e}", exc_info=True)
             return {
                 "answer": "",
                 "input_query": question,
@@ -225,7 +225,7 @@ class KAGSolverWrapper:
     
     async def aquery(self, question: str) -> Dict:
         """
-        使用KAG推理引擎回答问题（异步版本）
+        使用推理引擎回答问题（异步版本）
         
         Args:
             question: 用户问题
@@ -236,11 +236,11 @@ class KAGSolverWrapper:
         self._init_solver()
         
         if self._solver is None:
-            logger.warning("KAG推理器未初始化，返回空结果")
+            logger.warning("推理器未初始化，返回空结果")
             return {
                 "answer": "",
                 "references": [],
-                "error": "KAG推理器未初始化"
+                "error": "推理器未初始化"
             }
         
         try:
@@ -267,7 +267,7 @@ class KAGSolverWrapper:
                     "raw_result": result
                 }
         except Exception as e:
-            logger.error(f"KAG推理查询失败: {e}", exc_info=True)
+            logger.error(f"推理查询失败: {e}", exc_info=True)
             return {
                 "answer": "",
                 "references": [],
@@ -276,7 +276,7 @@ class KAGSolverWrapper:
     
     def query_with_context(self, question: str, context: Optional[List[Dict]] = None) -> Dict:
         """
-        带上下文的KAG推理查询
+        带上下文的推理查询
         
         Args:
             question: 用户问题
@@ -410,19 +410,19 @@ class KAGSolverWrapper:
         # 2. 读取KAGPostProcessor的checkpoint（这里应该包含处理后的实体和关系）
         postprocessor_dir = ckpt_dir / "KAGPostProcessor"
         if postprocessor_dir.exists():
-            logger.debug(f"读取KAGPostProcessor checkpoint: {postprocessor_dir}")
+            logger.debug(f"读取后处理器checkpoint: {postprocessor_dir}")
             cache_data = self._read_diskcache_checkpoint(postprocessor_dir)
-            logger.debug(f"KAGPostProcessor找到 {len(cache_data)} 条记录")
+            logger.debug(f"后处理器找到 {len(cache_data)} 条记录")
             for key, value in cache_data.items():
                 graph_data = self._parse_subgraph(value, SubGraph)
                 nodes = graph_data.get("nodes", [])
                 edges = graph_data.get("edges", [])
                 if nodes:
                     all_entities.extend(nodes)
-                    logger.debug(f"从KAGPostProcessor key {key[:50]}... 提取到 {len(nodes)} 个节点")
+                    logger.debug(f"从后处理器 key {key[:50]}... 提取到 {len(nodes)} 个节点")
                 if edges:
                     all_relations.extend(edges)
-                    logger.debug(f"从KAGPostProcessor key {key[:50]}... 提取到 {len(edges)} 个边")
+                    logger.debug(f"从后处理器 key {key[:50]}... 提取到 {len(edges)} 个边")
             
             # 读取.val文件
             for val_file in postprocessor_dir.rglob("*.val"):

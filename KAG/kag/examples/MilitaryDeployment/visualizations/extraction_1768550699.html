@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KAG 知识图谱可视化 - 增强版</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .stat-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px 25px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-item .number {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-item .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        @media (max-width: 1400px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .panel-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-title::before {
+            content: "▸";
+            font-size: 1.2em;
+        }
+        
+        #graph-container {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+        
+        .text-panel {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .highlighted-text {
+            line-height: 1.8;
+            font-size: 14px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .text-normal {
+            color: #333;
+        }
+        
+        .text-entity {
+            background: linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            display: inline-block;
+            margin: 0 1px;
+        }
+        
+        .text-entity:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+        }
+        
+        .text-entity::after {
+            content: attr(data-type);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            margin-bottom: 5px;
+        }
+        
+        .text-entity:hover::after {
+            opacity: 1;
+        }
+        
+        .steps-panel {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+        }
+        
+        .steps-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .step-item {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            transition: all 0.3s;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        .step-item:hover {
+            transform: translateX(10px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .step-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .step-description {
+            color: #666;
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+        
+        .step-entities, .step-relations {
+            margin-top: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .entity-tag, .relation-tag {
+            background: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s;
+        }
+        
+        .entity-tag:hover, .relation-tag:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .control-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+        
+        .legend-label {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 KAG 知识图谱可视化</h1>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="number" id="node-count">0</span>
+                    <span class="label">实体节点</span>
+                    <span class="label" id="node-total" style="font-size: 0.8em; opacity: 0.7;"></span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="edge-count">0</span>
+                    <span class="label">关系边</span>
+                    <span class="label" id="edge-total" style="font-size: 0.8em; opacity: 0.7;"></span>
+                </div>
+                <div class="stat-item">
+                    <span class="number" id="type-count">0</span>
+                    <span class="label">实体类型</span>
+                </div>
+            </div>
+            <div id="sampling-notice" style="margin-top: 15px; padding: 10px; background: rgba(255, 255, 255, 0.2); border-radius: 5px; display: none;">
+                <span style="font-size: 0.9em;">⚠️ 数据量较大，仅显示部分重要节点和关系（按连接度排序）</span>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="panel">
+                <div class="panel-title">知识图谱</div>
+                <div class="controls">
+                    <button class="control-btn" onclick="resetView()">重置视图</button>
+                    <button class="control-btn" onclick="fitView()">适应窗口</button>
+                    <button class="control-btn" onclick="togglePhysics()">切换物理引擎</button>
+                </div>
+                <div id="graph-container"></div>
+                <div class="legend" id="legend"></div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">原文高亮</div>
+                <div class="text-panel">
+                    <div class="highlighted-text" id="highlighted-text">
+                        <span class="text-entity" data-entity-id="876451" data-type="参考点" style="background: linear-gradient(120deg, #FF6B6B88 0%, #FF6B6BAA 100%);">876451</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel steps-panel">
+                <div class="panel-title">抽取过程</div>
+                <div class="steps-container" id="steps-container">
+                    
+                <div class="step-item" style="animation-delay: 0.1s">
+                    <div class="step-header">
+                        <div class="step-number">1</div>
+                        <div class="step-name">实体识别 (NER)</div>
+                    </div>
+                    <div class="step-description">识别出 1 个实体</div>
+                    <div class="step-entities"><span class="entity-tag">876451 (参考点)</span></div>
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.2s">
+                    <div class="step-header">
+                        <div class="step-number">2</div>
+                        <div class="step-name">实体标准化</div>
+                    </div>
+                    <div class="step-description">标准化了 1 个实体</div>
+                    
+                    
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.30000000000000004s">
+                    <div class="step-header">
+                        <div class="step-number">3</div>
+                        <div class="step-name">关系抽取</div>
+                    </div>
+                    <div class="step-description">抽取了 1 条关系</div>
+                    
+                    <div class="step-relations"><span class="relation-tag">876451 --[位置关系]--> 876451</span></div>
+                </div>
+            
+                <div class="step-item" style="animation-delay: 0.4s">
+                    <div class="step-header">
+                        <div class="step-number">4</div>
+                        <div class="step-name">图谱构建</div>
+                    </div>
+                    <div class="step-description">构建包含 3 个节点和 3 条边的知识图谱</div>
+                    
+                    
+                </div>
+            
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 图数据
+        const graphData = {
+  "nodes": [
+    {
+      "id": "8acf638f-04f5-425b-bac4-eb8193289972",
+      "label": "876451",
+      "type": "Chunk",
+      "color": "#4ECDC4",
+      "properties": {
+        "id": "8acf638f-04f5-425b-bac4-eb8193289972",
+        "name": "876451",
+        "content": "876451\n876451"
+      },
+      "size": 20,
+      "degree": 2
+    },
+    {
+      "id": "876451",
+      "label": "876451",
+      "type": "参考点",
+      "color": "#FF6B6B",
+      "properties": {},
+      "size": 20,
+      "degree": 2
+    },
+    {
+      "id": "参考点876451",
+      "label": "参考点876451",
+      "type": "参考点",
+      "color": "#FF6B6B",
+      "properties": {},
+      "size": 20,
+      "degree": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "876451",
+      "to": "8acf638f-04f5-425b-bac4-eb8193289972",
+      "label": "source",
+      "color": "#3498DB",
+      "properties": {}
+    },
+    {
+      "from": "参考点876451",
+      "to": "8acf638f-04f5-425b-bac4-eb8193289972",
+      "label": "source",
+      "color": "#3498DB",
+      "properties": {}
+    },
+    {
+      "from": "876451",
+      "to": "参考点876451",
+      "label": "OfficialName",
+      "color": "#9B59B6",
+      "properties": {}
+    }
+  ],
+  "nodeTypes": [
+    "参考点",
+    "Chunk"
+  ],
+  "relationTypes": [
+    "OfficialName",
+    "source"
+  ],
+  "stats": {
+    "total_nodes": 3,
+    "total_edges": 3,
+    "displayed_nodes": 3,
+    "displayed_edges": 3,
+    "sampled": false
+  }
+};
+        const highlightedText = {"original": "876451", "segments": [{"text": "876451", "type": "entity", "entityName": "876451", "entityType": "参考点", "entityId": "876451", "color": "#FF6B6B"}], "entities": {"876451": {"type": "参考点", "id": "876451", "color": "#FF6B6B"}}};
+        
+        // 初始化网络图
+        let network = null;
+        let physicsEnabled = true;
+        
+        function initGraph() {
+            const container = document.getElementById('graph-container');
+            
+            // 详细的调试信息
+            console.log("=== 开始初始化图表 ===");
+            console.log("graphData:", graphData);
+            console.log("graphData.nodes:", graphData.nodes);
+            console.log("graphData.edges:", graphData.edges);
+            console.log("节点数量:", graphData.nodes ? graphData.nodes.length : 0);
+            console.log("边数量:", graphData.edges ? graphData.edges.length : 0);
+            
+            // 验证数据
+            if (!graphData) {
+                console.error("graphData 未定义");
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>数据未定义</h3><p>graphData 变量未定义，请检查数据传递</p></div>';
+                return;
+            }
+            
+            if (!graphData.nodes || !Array.isArray(graphData.nodes)) {
+                console.error("graphData.nodes 无效:", graphData.nodes);
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>节点数据无效</h3><p>graphData.nodes 不是数组或不存在</p></div>';
+                return;
+            }
+            
+            if (graphData.nodes.length === 0) {
+                console.error("节点数组为空");
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>无节点数据</h3><p>节点数组为空，无法显示可视化</p><p>请检查数据源</p></div>';
+                document.getElementById('node-count').textContent = '0';
+                document.getElementById('edge-count').textContent = '0';
+                document.getElementById('type-count').textContent = '0';
+                return;
+            }
+            
+            console.log("✅ 数据验证通过，开始创建节点和边");
+            
+            // 先计算数据规模（用于决定字体大小等）
+            const nodeCount = graphData.nodes.length;
+            const edgeCount = graphData.edges ? graphData.edges.length : 0;
+            const isLargeGraph = nodeCount > 200 || edgeCount > 500;
+            
+            console.log(`数据规模: ${nodeCount} 节点, ${edgeCount} 边, 大数据集: ${isLargeGraph}`);
+            
+            // 处理节点数据，确保格式正确
+            const processedNodes = [];
+            for (let i = 0; i < graphData.nodes.length; i++) {
+                const node = graphData.nodes[i];
+                try {
+                    // 验证节点数据：确保id存在且不为空
+                    if (!node) {
+                        console.warn(`节点 ${i} 为 null 或 undefined`);
+                        continue;
+                    }
+                    
+                    // 检查id是否存在且有效
+                    const nodeId = node.id;
+                    if (nodeId === null || nodeId === undefined || nodeId === '') {
+                        console.warn(`节点 ${i} 的 id 无效:`, nodeId, node);
+                        continue;
+                    }
+                    
+                    // 直接使用节点数据，vis.js会自动处理（参考Pyvis方式）
+                    const nodeId = node.id;
+                    const nodeLabel = node.label || node.name || String(nodeId) || 'Unknown';
+                    
+                    processedNodes.push({
+                        id: nodeId,  // vis.js支持字符串和数字，不做强制转换
+                        label: String(nodeLabel),  // label必须是字符串
+                        color: {
+                            background: node.color || '#888888',
+                            border: '#2B2B2B',
+                            highlight: {
+                                background: node.color || '#888888',
+                                border: '#000000'
+                            }
+                        },
+                        size: node.size || 20,
+                        font: {
+                            size: isLargeGraph ? 12 : 14,
+                            face: 'Microsoft YaHei'
+                        },
+                        shape: 'box',
+                        title: `${node.type || 'Unknown'}\n${JSON.stringify(node.properties || {}, null, 2)}`
+                    });
+                } catch (error) {
+                    console.error(`处理节点 ${i} 时出错:`, error, node);
+                }
+            }
+            
+            console.log(`处理后的节点数: ${processedNodes.length} / ${graphData.nodes.length}`);
+            
+            if (processedNodes.length === 0) {
+                console.error("处理后的节点数为0，无法继续");
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>节点数据处理失败</h3><p>所有节点数据处理后都无效</p><p>请检查数据格式</p></div>';
+                return;
+            }
+            
+            const nodes = new vis.DataSet(processedNodes);
+            
+            // 处理边数据，确保from和to都存在（使用处理后的节点ID，保持原始类型）
+            const validEdges = [];
+            const nodeIds = new Set(processedNodes.map(n => n.id));  // 保持原始类型，不做字符串转换
+            
+            console.log(`节点ID集合大小: ${nodeIds.size}`);
+            if (nodeIds.size > 0) {
+                console.log("前5个节点ID:", Array.from(nodeIds).slice(0, 5));
+            }
+            
+            if (graphData.edges && graphData.edges.length > 0) {
+                console.log(`开始处理 ${graphData.edges.length} 条边`);
+                for (let i = 0; i < graphData.edges.length; i++) {
+                    const edge = graphData.edges[i];
+                    try {
+                        // 直接使用edge.from和edge.to，vis.js会自动匹配（参考Pyvis方式）
+                        const fromId = edge.from || edge.from_id;
+                        const toId = edge.to || edge.to_id;
+                        
+                        // 确保from和to存在且在节点列表中（使用原始类型比较）
+                        if (fromId !== null && fromId !== undefined && 
+                            toId !== null && toId !== undefined &&
+                            nodeIds.has(fromId) && nodeIds.has(toId)) {
+                            validEdges.push({
+                                from: fromId,  // 保持原始类型，vis.js会自动匹配
+                                to: toId,
+                                label: String(edge.label || ''),
+                                color: {
+                                    color: edge.color || "#666666",
+                                    highlight: edge.color || "#666666"
+                                },
+                                width: isLargeGraph ? 1 : 2,
+                                arrows: {
+                                    to: {
+                                        enabled: true,
+                                        type: 'arrow'
+                                    }
+                                },
+                                font: {
+                                    size: isLargeGraph ? 10 : 12,
+                                    face: 'Microsoft YaHei',
+                                    align: 'middle'
+                                },
+                                smooth: {
+                                    type: isLargeGraph ? 'straightCross' : 'cubicBezier',
+                                    roundness: 0.4
+                                }
+                            });
+                        }
+                    } catch (error) {
+                        console.warn(`处理边 ${i} 时出错:`, error, edge);
+                    }
+                }
+                console.log(`✅ 有效边数: ${validEdges.length} / ${graphData.edges.length}`);
+            } else {
+                console.warn("边数据为空或不存在");
+            }
+            
+            const edges = new vis.DataSet(validEdges);
+            
+            const data = { nodes: nodes, edges: edges };
+            
+            // 再次验证
+            if (nodes.length === 0) {
+                console.error("No valid nodes after processing");
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>节点数据无效</h3><p>无法创建节点，请检查数据格式</p></div>';
+                return;
+            }
+            
+            console.log(`✅ 准备创建网络图: ${processedNodes.length} 个节点, ${validEdges.length} 条边`);
+            
+            // 根据数据量优化配置（使用实际处理后的数据）
+            const nodeCount = processedNodes.length;
+            const edgeCount = validEdges.length;
+            const isLargeGraph = nodeCount > 200 || edgeCount > 500;
+            
+            console.log(`图规模: ${nodeCount} 节点, ${edgeCount} 边, 大数据集: ${isLargeGraph}`);
+            
+            const options = {
+                physics: {
+                    enabled: physicsEnabled && !isLargeGraph, // 大数据集默认关闭物理引擎以提高性能
+                    stabilization: {
+                        iterations: isLargeGraph ? 50 : 200, // 大数据集减少迭代次数
+                        updateInterval: isLargeGraph ? 25 : 5
+                    },
+                    barnesHut: {
+                        gravitationalConstant: -2000,
+                        centralGravity: 0.3,
+                        springLength: isLargeGraph ? 150 : 200, // 大数据集缩短弹簧长度
+                        springConstant: isLargeGraph ? 0.03 : 0.04,
+                        damping: isLargeGraph ? 0.12 : 0.09,
+                        avoidOverlap: isLargeGraph ? 1 : 0
+                    },
+                    solver: isLargeGraph ? 'barnesHut' : 'barnesHut',
+                    timestep: isLargeGraph ? 0.35 : 0.5
+                },
+                interaction: {
+                    hover: !isLargeGraph, // 大数据集关闭悬停以提升性能
+                    tooltipDelay: 100,
+                    zoomView: true,
+                    dragView: true,
+                    selectConnectedEdges: !isLargeGraph
+                },
+                nodes: {
+                    borderWidth: isLargeGraph ? 1 : 2, // 大数据集减小边框宽度
+                    shadow: {
+                        enabled: !isLargeGraph, // 大数据集关闭阴影
+                        size: 10,
+                        x: 5,
+                        y: 5
+                    },
+                    font: {
+                        size: isLargeGraph ? 12 : 14 // 大数据集减小字体
+                    },
+                    scaling: {
+                        min: 10,
+                        max: 30
+                    }
+                },
+                edges: {
+                    shadow: {
+                        enabled: !isLargeGraph, // 大数据集关闭阴影
+                        size: 5
+                    },
+                    width: isLargeGraph ? 1 : 2, // 大数据集减小边宽度
+                    font: {
+                        size: isLargeGraph ? 10 : 12 // 大数据集减小字体
+                    },
+                    smooth: {
+                        type: isLargeGraph ? 'straightCross' : 'cubicBezier', // 大数据集使用更简单的线条
+                        roundness: 0.4
+                    }
+                },
+                layout: {
+                    improvedLayout: !isLargeGraph // 大数据集使用快速布局
+                }
+            };
+            
+            // 添加错误处理和性能优化
+            try {
+                network = new vis.Network(container, data, options);
+                
+                // 大数据集时禁用动画以提升性能
+                if (isLargeGraph) {
+                    network.on("stabilizationProgress", function(params) {
+                        if (params.iterations === params.total) {
+                            network.setOptions({ physics: false });
+                        }
+                    });
+                }
+                
+                // 监听错误
+                network.on("error", function(params) {
+                    console.error("Network error:", params);
+                });
+            } catch (error) {
+                console.error("Failed to initialize network:", error);
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>可视化加载失败</h3><p>数据量过大，请尝试减少显示的数据量</p><p>节点数: ' + nodeCount + ', 边数: ' + edgeCount + '</p></div>';
+                return;
+            }
+            
+            // 更新统计信息（使用实际的数据长度）
+            const displayedNodes = nodes.length;
+            const displayedEdges = edges.length;
+            
+            console.log("Updating stats:", displayedNodes, "nodes,", displayedEdges, "edges");
+            
+            document.getElementById('node-count').textContent = displayedNodes;
+            document.getElementById('edge-count').textContent = displayedEdges;
+            document.getElementById('type-count').textContent = graphData.nodeTypes ? graphData.nodeTypes.length : 0;
+            
+            // 如果有采样信息，显示总数
+            if (graphData.stats) {
+                const stats = graphData.stats;
+                const nodeTotalEl = document.getElementById('node-total');
+                const edgeTotalEl = document.getElementById('edge-total');
+                
+                if (stats.total_nodes > displayedNodes && nodeTotalEl) {
+                    nodeTotalEl.textContent = `(共 ${stats.total_nodes} 个)`;
+                }
+                if (stats.total_edges > displayedEdges && edgeTotalEl) {
+                    edgeTotalEl.textContent = `(共 ${stats.total_edges} 条)`;
+                }
+                if (stats.sampled) {
+                    const noticeEl = document.getElementById('sampling-notice');
+                    if (noticeEl) {
+                        noticeEl.style.display = 'block';
+                    }
+                }
+            }
+            
+            // 如果数据为空，显示警告
+            if (displayedNodes === 0) {
+                console.error("No nodes to display!");
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;"><h3>无数据可显示</h3><p>节点数为0，请检查数据加载</p></div>';
+            }
+            
+            // 创建图例
+            createLegend();
+            
+            // 节点点击事件
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    highlightEntityInText(nodeId);
+                }
+            });
+        }
+        
+        function createLegend() {
+            const legendContainer = document.getElementById('legend');
+            legendContainer.innerHTML = '';
+            
+            graphData.nodeTypes.forEach(type => {
+                const node = graphData.nodes.find(n => n.type === type);
+                if (node) {
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `
+                        <div class="legend-color" style="background: ${node.color}"></div>
+                        <span class="legend-label">${type}</span>
+                    `;
+                    legendContainer.appendChild(item);
+                }
+            });
+        }
+        
+        function highlightEntityInText(nodeId) {
+            const node = graphData.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            
+            // 高亮文本中的实体
+            const textElements = document.querySelectorAll('.text-entity');
+            textElements.forEach(el => {
+                if (el.getAttribute('data-entity-id') === nodeId) {
+                    el.style.background = 'linear-gradient(120deg, #ff6b6b 0%, #ee5a6f 100%)';
+                    el.style.color = 'white';
+                    setTimeout(() => {
+                        el.style.background = '';
+                        el.style.color = '';
+                    }, 2000);
+                }
+            });
+        }
+        
+        function resetView() {
+            if (network) {
+                network.fit();
+            }
+        }
+        
+        function fitView() {
+            if (network) {
+                network.fit({
+                    animation: true
+                });
+            }
+        }
+        
+        function togglePhysics() {
+            if (isLargeGraph) {
+                alert('大数据集不支持物理引擎，请使用固定布局以获得更好的性能');
+                return;
+            }
+            physicsEnabled = !physicsEnabled;
+            if (network) {
+                try {
+                    network.setOptions({
+                        physics: {
+                            enabled: physicsEnabled
+                        }
+                    });
+                } catch (error) {
+                    console.error("Failed to toggle physics:", error);
+                }
+            }
+        }
+        
+        // 渲染高亮文本
+        function renderHighlightedText() {
+            if (!highlightedText || !highlightedText.segments) {
+                document.getElementById('highlighted-text').textContent = '暂无原文内容';
+                return;
+            }
+            
+            const container = document.getElementById('highlighted-text');
+            container.innerHTML = '';
+            
+            highlightedText.segments.forEach(segment => {
+                const span = document.createElement('span');
+                if (segment.type === 'entity') {
+                    span.className = 'text-entity';
+                    span.textContent = segment.text;
+                    span.setAttribute('data-entity-id', segment.entityId);
+                    span.setAttribute('data-type', segment.entityType);
+                    span.style.background = `linear-gradient(120deg, ${segment.color}88 0%, ${segment.color}AA 100%)`;
+                    span.onclick = () => {
+                        // 点击实体时高亮图中的节点
+                        if (network) {
+                            network.selectNodes([segment.entityId]);
+                            network.focus(segment.entityId, {
+                                scale: 1.5,
+                                animation: true
+                            });
+                        }
+                    };
+                } else {
+                    span.className = 'text-normal';
+                    span.textContent = segment.text;
+                }
+                container.appendChild(span);
+            });
+        }
+        
+        // 初始化
+        window.addEventListener('DOMContentLoaded', function() {
+            initGraph();
+            renderHighlightedText();
+        });
+    </script>
+</body>
+</html>

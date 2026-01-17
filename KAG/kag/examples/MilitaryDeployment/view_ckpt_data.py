@@ -1,5 +1,5 @@
 """
-查看KAG checkpoint中提取的实体和关系数据
+查看checkpoint中提取的实体和关系数据
 """
 import os
 import sys
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 from collections import defaultdict
 
-# 添加KAG路径
+# 添加项目路径
 BASE_DIR = Path(__file__).parent.parent.parent.parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
@@ -24,7 +24,7 @@ except ImportError:
         from kag.builder.model.edge import Edge
         SUBGRAPH_AVAILABLE = True
     except ImportError:
-        print("警告：无法导入KAG模型，将使用字典方式解析数据")
+        print("警告：无法导入模型，将使用字典方式解析数据")
         SubGraph = None
         SUBGRAPH_AVAILABLE = False
 
@@ -306,7 +306,7 @@ def extract_entities_and_relations(ckpt_dir: Path) -> Dict[str, Any]:
     # 2. 读取KAGPostProcessor的checkpoint（这里应该包含处理后的实体和关系）
     postprocessor_dir = ckpt_dir / "KAGPostProcessor"
     if postprocessor_dir.exists():
-        print(f"\n读取KAGPostProcessor checkpoint: {postprocessor_dir}")
+        print(f"\n读取后处理器checkpoint: {postprocessor_dir}")
         # 读取cache.db
         cache_data = read_diskcache_checkpoint(postprocessor_dir)
         print(f"  找到 {len(cache_data)} 条记录")
@@ -440,7 +440,7 @@ def format_relation(relation: Any) -> Dict[str, Any]:
 def print_results(results: Dict[str, Any], limit: int = 50):
     """打印结果"""
     print("\n" + "=" * 80)
-    print("KAG Checkpoint 数据统计")
+    print("Checkpoint 数据统计")
     print("=" * 80)
     
     print(f"\n实体总数: {len(results['entities'])}")

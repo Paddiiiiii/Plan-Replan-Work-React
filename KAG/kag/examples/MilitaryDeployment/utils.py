@@ -4,7 +4,7 @@ MilitaryDeployment项目工具函数和Schema定义
 """
 
 # ============ OpenSPG Schema定义 ============
-# 用于KAG知识图谱构建的Schema定义
+# 用于知识图谱构建的Schema定义
 
 SCHEMA_DEFINITION = """
 # ============ 基础类型 ============

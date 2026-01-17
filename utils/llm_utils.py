@@ -173,13 +173,23 @@ def call_llm(messages: List[Dict], timeout: int = None) -> str:
         "messages": messages
     }
     
-    # 移除rate_limit配置，避免发送到API
+    # 移除rate_limit和api_key配置，避免发送到API payload中
     payload.pop("rate_limit", None)
+    api_key = payload.pop("api_key", None)
+    
+    # 构建请求头
+    headers = {
+        "Content-Type": "application/json"
+    }
+    # 如果有API key，添加到请求头
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     
     try:
         response = requests.post(
             LLM_CONFIG["api_endpoint"], 
             json=payload, 
+            headers=headers,
             timeout=timeout
         )
         response.raise_for_status()

@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-KAG 实体-关系图增强可视化示例
+实体-关系图增强可视化示例
 展示如何使用增强的可视化工具来查看抽取结果
 """
 import os
 import sys
 from pathlib import Path
 
-# 添加KAG根目录到路径
-KAG_ROOT = Path(__file__).resolve().parents[3]
-if str(KAG_ROOT) not in sys.path:
-    sys.path.insert(0, str(KAG_ROOT))
+# 添加项目根目录到路径
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from kag.builder.model.sub_graph import SubGraph, Node, Edge
 from kag.builder.model.chunk import Chunk
@@ -115,7 +115,7 @@ def create_extraction_steps():
 def main():
     """主函数"""
     print("=" * 60)
-    print("KAG 实体-关系图增强可视化示例")
+    print("实体-关系图增强可视化示例")
     print("=" * 60)
     
     # 创建示例数据

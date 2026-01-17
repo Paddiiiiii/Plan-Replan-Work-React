@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def query(question: str):
-    """使用KAG推理引擎回答问题"""
+    """使用推理引擎回答问题"""
     solver = SolverPipelineABC.from_config(
         KAG_CONFIG.all_config["kag_solver_pipeline"]
     )
     
-    # KAG的pipeline使用异步方法
+    # pipeline使用异步方法
     result = asyncio.run(solver.ainvoke(question))
     
     logger.info(f"\n问题: {question}")

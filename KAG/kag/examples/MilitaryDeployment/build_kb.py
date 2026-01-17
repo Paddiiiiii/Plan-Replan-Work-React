@@ -7,10 +7,10 @@ import sys
 import subprocess
 from pathlib import Path
 
-# 确保能导入 knext（位于 F:/AIgen/KAG/knext）
-KAG_ROOT = Path(__file__).resolve().parents[3]
-if str(KAG_ROOT) not in sys.path:
-    sys.path.insert(0, str(KAG_ROOT))
+# 确保能导入 knext（位于项目根目录）
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # 获取当前脚本所在目录
 BASE_DIR = Path(__file__).parent
@@ -89,14 +89,14 @@ def delete_existing_project():
     
     # 尝试通过API删除项目
     try:
-        # 切换到KAG根目录以导入模块
-        kag_root = BASE_DIR.parent.parent.parent.parent
+        # 切换到项目根目录以导入模块
+        project_root = BASE_DIR.parent.parent.parent.parent
         original_cwd = os.getcwd()
-        os.chdir(str(kag_root))
+        os.chdir(str(project_root))
         
         # 添加路径
-        if str(kag_root) not in sys.path:
-            sys.path.insert(0, str(kag_root))
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
         
         from knext.project.client import ProjectClient
         
@@ -171,9 +171,9 @@ def delete_existing_project():
         return True
 
 def restore_project():
-    """恢复/创建KAG项目（使用restore命令，会自动处理项目ID）"""
+    """恢复/创建项目（使用restore命令，会自动处理项目ID）"""
     print("\n" + "=" * 60)
-    print("步骤1: 恢复/创建KAG项目...")
+    print("步骤1: 恢复/创建项目...")
     print("=" * 60)
     
     # 先尝试删除已存在的冲突项目
@@ -212,7 +212,7 @@ def restore_project():
     print(f"执行命令: {' '.join(cmd)}")
     print(f"工作目录: {BASE_DIR}")
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{KAG_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{PROJECT_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
@@ -260,7 +260,7 @@ def commit_schema():
     
     print(f"执行命令: {' '.join(cmd)}")
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{KAG_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{PROJECT_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     
     if result.returncode != 0:
@@ -329,7 +329,7 @@ def build_knowledge_base():
     
     # 设置PYTHONPATH，确保能找到kag模块
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{KAG_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{PROJECT_ROOT}{os.pathsep}" + env.get("PYTHONPATH", "")
     
     print(f"执行命令: {' '.join(cmd)}")
     print(f"数据目录: {DATA_DIR}")
@@ -363,7 +363,7 @@ def build_knowledge_base():
 def verify_knowledge_base():
     """验证知识库数据是否写入成功"""
     try:
-        # 切换到KAG根目录以导入模块
+        # 切换到项目根目录以导入模块
         kag_root = BASE_DIR.parent.parent.parent.parent
         original_cwd = os.getcwd()
         os.chdir(str(kag_root))
@@ -490,7 +490,7 @@ def verify_knowledge_base():
 def main():
     """主函数"""
     print("\n" + "=" * 60)
-    print("KAG知识库一键构建脚本")
+    print("知识库一键构建脚本")
     print("=" * 60)
     print(f"工作目录: {BASE_DIR}")
     print(f"配置文件: {CONFIG_FILE}")

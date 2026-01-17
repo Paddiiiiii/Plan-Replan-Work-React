@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-KAG 知识抽取交互式前端
+知识抽取交互式前端
 支持输入文本并实时进行知识抽取，展示抽取过程和结果
 
 使用方法:
-    方式1: python -m streamlit run kag_extraction_frontend.py
-    方式2: streamlit run kag_extraction_frontend.py (如果streamlit在PATH中)
+    方式1: python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
+    方式2: streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0 (如果streamlit在PATH中)
+    
+    注意: 默认端口已配置为9501（避免与外层系统的8501冲突），已配置允许局域网访问
     
 或者使用启动脚本（推荐）:
     Windows: 双击运行 run_extraction_frontend.bat
@@ -19,6 +21,7 @@ from typing import Dict, List, Optional
 import json
 import time
 import uuid
+import datetime
 
 # 检查是否使用streamlit run启动
 if __name__ == "__main__" and "streamlit" not in sys.modules:
@@ -26,8 +29,9 @@ if __name__ == "__main__" and "streamlit" not in sys.modules:
     print("错误: 请使用 streamlit 命令启动此应用")
     print("=" * 60)
     print("\n正确的启动方式:")
-    print("  方式1: python -m streamlit run kag_extraction_frontend.py")
-    print("  方式2: streamlit run kag_extraction_frontend.py (如果streamlit在PATH中)")
+    print("  方式1: python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0")
+    print("  方式2: streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0 (如果streamlit在PATH中)")
+    print("\n  注意: 默认端口已配置为9501（避免与外层系统的8501冲突），已配置允许局域网访问")
     print("\n或者使用启动脚本（推荐）:")
     print("  Windows: 双击运行 run_extraction_frontend.bat")
     print("  Linux/Mac: ./run_extraction_frontend.sh")
@@ -36,14 +40,14 @@ if __name__ == "__main__" and "streamlit" not in sys.modules:
 
 import streamlit as st
 
-# 添加KAG根目录到路径
-KAG_ROOT = Path(__file__).resolve().parents[3]
-if str(KAG_ROOT) not in sys.path:
-    sys.path.insert(0, str(KAG_ROOT))
+# 添加项目根目录到路径
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # 设置页面配置
 st.set_page_config(
-    page_title="KAG 知识抽取系统",
+    page_title="知识抽取系统",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -52,15 +56,70 @@ st.set_page_config(
 # 注入自定义CSS样式
 st.markdown("""
 <style>
-    /* 全局样式 */
+    /* 全局页面背景 */
+    html, body, #root, .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #5a67d8 100%) !important;
+        background-attachment: fixed !important;
+        min-height: 100vh !important;
+    }
+    
+    /* 主容器样式 */
     .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: transparent !important;
         padding: 2rem;
+    }
+    
+    /* Streamlit主内容区 */
+    .block-container {
+        background: rgba(255, 255, 255, 0.05) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 20px !important;
+        padding: 2rem !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    /* 主内容区文本 */
+    .block-container p, 
+    .block-container div, 
+    .block-container span {
+        color: #f7fafc !important;
+    }
+    
+    /* 所有Streamlit元素容器 */
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #5a67d8 100%) !important;
+    }
+    
+    [data-testid="stHeader"] {
+        background: rgba(102, 126, 234, 0.8) !important;
+        backdrop-filter: blur(10px) !important;
+    }
+    
+    /* 标签页样式 */
+    [data-baseweb="tabs"] {
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        padding: 0.5rem !important;
+    }
+    
+    [data-baseweb="tab"] {
+        color: rgba(255, 255, 255, 0.8) !important;
+        border-radius: 8px !important;
+    }
+    
+    [data-baseweb="tab"]:hover {
+        background: rgba(255, 255, 255, 0.2) !important;
+        color: white !important;
+    }
+    
+    [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
     }
     
     /* 标题样式 */
     h1 {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #5a67d8 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
@@ -73,13 +132,18 @@ st.markdown("""
     
     /* 卡片样式 */
     .stCard {
-        background: rgba(255, 255, 255, 0.95) !important;
+        background: rgba(255, 255, 255, 0.12) !important;
         border-radius: 20px !important;
         padding: 1.5rem !important;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border: 1px solid rgba(255, 255, 255, 0.25) !important;
         backdrop-filter: blur(10px) !important;
         transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+    }
+    
+    /* 卡片内文本 */
+    .stCard p, .stCard div, .stCard span {
+        color: #f7fafc !important;
     }
     
     .stCard:hover {
@@ -89,7 +153,7 @@ st.markdown("""
     
     /* 按钮样式 */
     .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #5a67d8 100%) !important;
         color: white !important;
         border: none !important;
         border-radius: 12px !important;
@@ -108,17 +172,53 @@ st.markdown("""
     
     /* 文本区域样式 */
     .stTextArea > div > div > textarea {
-        background: rgba(255, 255, 255, 0.9) !important;
+        background: rgba(255, 255, 255, 0.85) !important;
         border-radius: 12px !important;
-        border: 2px solid rgba(102, 126, 234, 0.3) !important;
+        border: 2px solid rgba(102, 126, 234, 0.5) !important;
         padding: 1rem !important;
         font-size: 1rem !important;
         transition: all 0.3s ease !important;
+        color: #2d3748 !important;
     }
     
     .stTextArea > div > div > textarea:focus {
         border-color: #667eea !important;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2) !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+    }
+    
+    /* 标签样式 */
+    label {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    /* 标题颜色 - 保持渐变效果 */
+    h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    /* 普通文本颜色 */
+    p, div, span {
+        color: #f7fafc !important;
+    }
+    
+    /* 深色文本区域 */
+    .stMarkdown p, .stMarkdown div, .stMarkdown span {
+        color: #f7fafc !important;
+    }
+    
+    /* 指标标签颜色 */
+    [data-testid="stMetricLabel"] {
+        color: rgba(255, 255, 255, 0.95) !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+    }
+    
+    /* 指标值颜色 - 保持渐变效果 */
+    [data-testid="stMetricValue"] {
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
     }
     
     /* 侧边栏样式 */
@@ -161,22 +261,56 @@ st.markdown("""
     
     /* 展开器样式 */
     .streamlit-expanderHeader {
-        background: linear-gradient(90deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%) !important;
+        background: rgba(255, 255, 255, 0.15) !important;
         border-radius: 10px !important;
         padding: 0.75rem 1rem !important;
         font-weight: 600 !important;
-        border: 1px solid rgba(102, 126, 234, 0.2) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        color: #ffffff !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
     }
     
     .streamlit-expanderHeader:hover {
-        background: linear-gradient(90deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%) !important;
+        background: rgba(255, 255, 255, 0.25) !important;
+    }
+    
+    .streamlit-expanderContent {
+        background: rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        margin-top: 0.5rem !important;
+        color: #f7fafc !important;
+    }
+    
+    .streamlit-expanderContent p, 
+    .streamlit-expanderContent div, 
+    .streamlit-expanderContent span {
+        color: #f7fafc !important;
     }
     
     /* 信息框样式 */
     .stAlert {
         border-radius: 12px !important;
         border-left: 4px solid #667eea !important;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+        background: rgba(255, 255, 255, 0.15) !important;
+        backdrop-filter: blur(10px) !important;
+    }
+    
+    .stAlert p, .stAlert div {
+        color: #ffffff !important;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    /* JSON查看器样式 */
+    [data-testid="stJson"] {
+        background: rgba(30, 30, 30, 0.8) !important;
+        border-radius: 8px !important;
+        padding: 1rem !important;
+    }
+    
+    /* 下载按钮容器 */
+    [data-testid="stDownloadButton"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
     }
     
     /* 代码块样式 */
@@ -290,12 +424,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 导入KAG模块
+# 导入配置模块
 from kag.common.conf import KAG_CONFIG
 from kag.common.registry import import_modules_from_path
 from kag.interface import ExtractorABC, LLMClient
 from kag.builder.model.chunk import Chunk, ChunkTypeEnum
 from kag.builder.model.sub_graph import SubGraph
+try:
+    from kag.builder.model.node import Node
+    from kag.builder.model.edge import Edge
+except ImportError:
+    # 如果导入失败，使用interface中的定义
+    from kag.interface.common.model.sub_graph import Node, Edge
 from kag.builder.component.reader.enhanced_graph_visualizer import visualize_enhanced_graph
 
 
@@ -320,7 +460,7 @@ def init_extractor():
         os.chdir(str(project_path))
         
         try:
-            # 初始化KAG配置
+            # 初始化配置
             config_file = project_path / "kag_config.yaml"
             if not config_file.exists():
                 st.error(f"配置文件不存在: {config_file}")
@@ -338,9 +478,8 @@ def init_extractor():
                     MilitaryDeploymentRelationPrompt,
                     MilitaryDeploymentSTDPrompt
                 )
-                st.info("✅ 已加载军事部署专用Prompt")
-            except ImportError as e:
-                st.warning(f"⚠️ 无法导入自定义Prompt: {e}，将使用默认Prompt")
+            except ImportError:
+                pass  # 使用默认Prompt
             
             # 从配置创建抽取器
             builder_config = KAG_CONFIG.all_config.get("kag_builder_pipeline")
@@ -368,7 +507,6 @@ def init_extractor():
             
             # 如果没有找到，创建一个schema_constraint_extractor配置（使用schema）
             if not extractor_config:
-                st.warning("未找到extractor配置，使用schema_constraint_extractor（推荐使用schema）")
                 extractor_config = {
                     "type": "schema_constraint_extractor",
                     "llm": KAG_CONFIG.all_config.get("openie_llm", {}),
@@ -380,7 +518,6 @@ def init_extractor():
                 # 如果找到的是knowledge_unit_extractor，替换为schema_constraint_extractor
                 extractor_type = extractor_config.get("type", "")
                 if "knowledge_unit" in extractor_type.lower() or "schema_free" in extractor_type.lower():
-                    st.info(f"检测到 {extractor_type}，替换为 schema_constraint_extractor 以使用schema定义")
                     # 保留LLM配置，但改用schema_constraint_extractor，并使用军事部署专用prompt
                     extractor_config = {
                         "type": "schema_constraint_extractor",
@@ -401,16 +538,6 @@ def init_extractor():
             
             # 创建抽取器
             extractor = ExtractorABC.from_config(extractor_config)
-            
-            # 验证抽取器类型
-            extractor_type_name = type(extractor).__name__
-            st.success(f"✅ 抽取器初始化成功: {extractor_type_name}")
-            
-            # 显示schema信息
-            if hasattr(extractor, 'schema'):
-                schema_types = list(extractor.schema.keys())
-                entity_types = [t for t in schema_types if not t.startswith("_") and t not in ["Chunk", "AtomicQuery", "KnowledgeUnit", "Summary", "Outline", "Doc"]]
-                st.info(f"📋 Schema中定义了 {len(entity_types)} 种实体类型: {', '.join(entity_types[:10])}{'...' if len(entity_types) > 10 else ''}")
             
             return extractor
             
@@ -466,7 +593,7 @@ def extract_knowledge_step_by_step(extractor, text: str, title: str = "输入文
         if hasattr(extractor, 'named_entity_recognition'):
             try:
                 if progress_callback:
-                    progress_callback(1, 4, "步骤 1/4: 正在调用LLM进行实体识别...")
+                    progress_callback(1, 4, "步骤 1/4: 正在进行实体识别...")
                 entities = extractor.named_entity_recognition(passage)
                 # 确保entities是列表
                 if entities is None:
@@ -685,6 +812,219 @@ def extract_knowledge_step_by_step(extractor, text: str, title: str = "输入文
         return None, steps
 
 
+def _parse_subgraph(value):
+    """解析SubGraph数据，支持多种格式"""
+    if isinstance(value, SubGraph):
+        return value
+    elif isinstance(value, list):
+        all_nodes = []
+        all_edges = []
+        for item in value:
+            if isinstance(item, SubGraph):
+                all_nodes.extend(item.nodes)
+                all_edges.extend(item.edges)
+            elif hasattr(item, 'data') and isinstance(item.data, SubGraph):
+                all_nodes.extend(item.data.nodes)
+                all_edges.extend(item.data.edges)
+            elif isinstance(item, dict):
+                result = _parse_subgraph(item)
+                if result:
+                    all_nodes.extend(result.nodes)
+                    all_edges.extend(result.edges)
+        if all_nodes or all_edges:
+            return SubGraph(nodes=all_nodes, edges=all_edges)
+    elif isinstance(value, dict):
+        # 检查是否有resultNodes/resultEdges
+        if "resultNodes" in value or "resultEdges" in value:
+            nodes = []
+            edges = []
+            seen_nodes = {}
+            
+            if "resultNodes" in value:
+                for node_data in value["resultNodes"]:
+                    node = Node(
+                        id=node_data.get("id", node_data.get("name", "")),
+                        name=node_data.get("name", node_data.get("id", "")),
+                        label=node_data.get("type", node_data.get("label", "")),
+                        properties=node_data.get("properties", {})
+                    )
+                    unique_id = f"{node.id}_{node.label}"
+                    if unique_id not in seen_nodes:
+                        seen_nodes[unique_id] = node
+                        nodes.append(node)
+            
+            if "resultEdges" in value:
+                for edge_data in value["resultEdges"]:
+                    from_id = edge_data.get("from", edge_data.get("from_id", ""))
+                    to_id = edge_data.get("to", edge_data.get("to_id", ""))
+                    from_type = edge_data.get("fromType", edge_data.get("from_type", ""))
+                    to_type = edge_data.get("toType", edge_data.get("to_type", ""))
+                    
+                    from_node = Node(id=from_id, name=from_id, label=from_type, properties={})
+                    to_node = Node(id=to_id, name=to_id, label=to_type, properties={})
+                    edge = Edge(
+                        _id="",
+                        from_node=from_node,
+                        to_node=to_node,
+                        label=edge_data.get("label", ""),
+                        properties=edge_data.get("properties", {})
+                    )
+                    edges.append(edge)
+            
+            if nodes or edges:
+                return SubGraph(nodes=nodes, edges=edges)
+    return None
+
+
+def generate_main_kb_visualization(subgraph: SubGraph, output_path: Path) -> Optional[Path]:
+    """
+    生成主知识库的可视化文件
+    
+    Args:
+        subgraph: 要可视化的SubGraph对象
+        output_path: 输出HTML文件路径（完整路径，包含.html扩展名）
+        
+    Returns:
+        生成的HTML文件路径，如果生成失败返回None
+    """
+    try:
+        # 验证数据
+        if not subgraph:
+            return None
+        
+        if not subgraph.nodes and not subgraph.edges:
+            return None
+        
+        from kag.builder.component.reader.enhanced_graph_visualizer import visualize_enhanced_graph
+        
+        # 确保输出目录存在
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 生成可视化（传入不带扩展名的路径）
+        generated_path = visualize_enhanced_graph(
+            subgraph=subgraph,
+            source_text="",
+            extraction_steps=[],
+            output_path=str(output_path.with_suffix(''))
+        )
+        
+        # 返回生成的路径（函数会自动添加.html扩展名）
+        result_path = Path(generated_path)
+        if result_path.exists() and result_path.stat().st_size > 1000:
+            return result_path
+        return None
+    except Exception as e:
+        print(f"[ERROR] 生成可视化失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def load_main_knowledge_base(ckpt_dir: Path) -> Optional[SubGraph]:
+    """
+    从主知识库checkpoint加载所有实体和关系，转换为SubGraph
+    
+    Args:
+        ckpt_dir: checkpoint目录路径
+        
+    Returns:
+        SubGraph对象，如果加载失败返回None
+    """
+    try:
+        from diskcache import Cache
+        
+        all_nodes = []
+        all_edges = []
+        seen_nodes = {}  # 用于去重: unique_id -> Node
+        loaded_count = 0
+        
+        # 需要检查的组件目录（按优先级排序）
+        component_dirs = [
+            "KGWriter",  # 最终写入的组件，最重要
+            "KAGPostProcessor",  # 后处理器（组件名称保持不变）
+            "KnowledgeUnitSchemaFreeExtractor",  # 抽取器
+        ]
+        
+        # 1. 读取各个组件的checkpoint
+        for component_name in component_dirs:
+            component_dir = ckpt_dir / component_name
+            if component_dir.exists():
+                try:
+                    cache = Cache(str(component_dir))
+                    cache_count = 0
+                    for key in cache:
+                        try:
+                            value = cache[key]
+                            subgraph = _parse_subgraph(value)
+                            if subgraph:
+                                cache_count += 1
+                                for node in subgraph.nodes:
+                                    node_id = node.id
+                                    node_label = node.label
+                                    unique_id = f"{node_id}_{node_label}"
+                                    if unique_id not in seen_nodes:
+                                        seen_nodes[unique_id] = node
+                                        all_nodes.append(node)
+                                for edge in subgraph.edges:
+                                    all_edges.append(edge)
+                        except Exception as e:
+                            continue
+                    if cache_count > 0:
+                        loaded_count += cache_count
+                        cache.close()
+                except Exception as e:
+                    pass  # 读取checkpoint失败，继续尝试其他组件
+        
+        # 2. 读取主checkpoint文件
+        main_ckpt = ckpt_dir / "kag_checkpoint_0_1.ckpt"
+        if main_ckpt.exists():
+            try:
+                main_count = 0
+                with open(main_ckpt, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            if "id" in entry and "value" in entry:
+                                value = entry["value"]
+                                subgraph = _parse_subgraph(value)
+                                if subgraph:
+                                    main_count += 1
+                                    for node in subgraph.nodes:
+                                        node_id = node.id
+                                        node_label = node.label
+                                        unique_id = f"{node_id}_{node_label}"
+                                        if unique_id not in seen_nodes:
+                                            seen_nodes[unique_id] = node
+                                            all_nodes.append(node)
+                                    for edge in subgraph.edges:
+                                        all_edges.append(edge)
+                        except json.JSONDecodeError:
+                            continue
+                        except Exception as e:
+                            continue
+                if main_count > 0:
+                    loaded_count += main_count
+            except Exception as e:
+                pass  # 读取主checkpoint文件失败
+        
+        if not all_nodes and not all_edges:
+            return None
+        
+        # 创建SubGraph
+        subgraph = SubGraph(nodes=all_nodes, edges=all_edges)
+        # 成功加载主知识库
+        return subgraph
+        
+    except Exception as e:
+        st.error(f"加载主知识库失败: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+
+
 async def extract_knowledge_async(extractor, text: str, title: str = "输入文本"):
     """异步执行知识抽取"""
     try:
@@ -717,8 +1057,8 @@ def main():
     # 使用自定义标题样式
     st.markdown("""
     <div class="fade-in">
-        <h1>🧠 KAG 知识抽取系统</h1>
-        <p style="text-align: center; color: #666; font-size: 1.2rem; margin-top: -1rem;">
+        <h1>🧠 知识抽取系统</h1>
+        <p style="text-align: center; color: rgba(255, 255, 255, 0.9); font-size: 1.2rem; margin-top: -1rem;">
             <span style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
                 🚀 智能知识图谱构建 | 实时抽取监控 | 可视化展示
             </span>
@@ -727,69 +1067,27 @@ def main():
     """, unsafe_allow_html=True)
     st.markdown("---")
     
-    # 侧边栏配置
-    with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; padding: 1rem 0;">
-            <h2 style="color: white; margin-bottom: 0.5rem;">⚙️ 系统配置</h2>
-            <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">知识抽取引擎控制中心</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 初始化抽取器
-        if st.button("🔄 初始化抽取器", use_container_width=True, type="primary"):
-            with st.spinner("🔄 正在初始化抽取器..."):
-                st.session_state.extractor = init_extractor()
-                if st.session_state.extractor:
-                    st.success("✅ 抽取器初始化成功！")
-                    st.balloons()  # 庆祝动画
-                else:
-                    st.error("❌ 抽取器初始化失败")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # 状态指示器
-        if st.session_state.extractor:
-            st.markdown("""
-            <div style="background: rgba(76, 175, 80, 0.2); padding: 1rem; border-radius: 10px; border-left: 4px solid #4caf50;">
-                <p style="color: white; margin: 0; font-weight: 600;">✅ 抽取器已就绪</p>
-                <p style="color: rgba(255,255,255,0.8); margin: 0.5rem 0 0 0; font-size: 0.9rem;">系统运行正常，可以开始抽取</p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="background: rgba(255, 152, 0, 0.2); padding: 1rem; border-radius: 10px; border-left: 4px solid #ff9800;">
-                <p style="color: white; margin: 0; font-weight: 600;">⚠️ 请先初始化抽取器</p>
-                <p style="color: rgba(255,255,255,0.8); margin: 0.5rem 0 0 0; font-size: 0.9rem;">点击上方按钮初始化系统</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.markdown("""
-        <div style="padding: 0.5rem 0;">
-            <h3 style="color: white; margin-bottom: 1rem;">📚 使用指南</h3>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown("""
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 1rem; border-radius: 10px; color: white;">
-            <p style="margin: 0.5rem 0;">1️⃣ 点击"初始化抽取器"按钮</p>
-            <p style="margin: 0.5rem 0;">2️⃣ 在文本框中输入要抽取的文本</p>
-            <p style="margin: 0.5rem 0;">3️⃣ 点击"开始抽取"按钮</p>
-            <p style="margin: 0.5rem 0;">4️⃣ 查看抽取过程和结果</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # 创建标签页
+    tab1, tab2 = st.tabs(["📝 知识抽取", "📊 主知识库展示"])
     
-    # 主内容区
-    col1, col2 = st.columns([1, 1])
+    # 初始化会话状态
+    if 'main_kb_loaded' not in st.session_state:
+        st.session_state.main_kb_loaded = False
+    if 'main_kb_subgraph' not in st.session_state:
+        st.session_state.main_kb_subgraph = None
+    if 'main_kb_selected_entity_types' not in st.session_state:
+        st.session_state.main_kb_selected_entity_types = []
+    if 'main_kb_selected_relation_types' not in st.session_state:
+        st.session_state.main_kb_selected_relation_types = []
+    if 'main_kb_search_term' not in st.session_state:
+        st.session_state.main_kb_search_term = ""
     
-    with col1:
-        st.markdown("""
-        <div class="fade-in">
-            <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                📝 输入文本
-            </h2>
-        </div>
-        """, unsafe_allow_html=True)
+    # 自动初始化抽取器（如果尚未初始化）
+    if st.session_state.extractor is None:
+        st.session_state.extractor = init_extractor()
+    
+    # 标签页1: 知识抽取
+    with tab1:
         input_text = st.text_area(
             "请输入要抽取知识的文本:",
             height=300,
@@ -808,265 +1106,32 @@ def main():
             st.session_state.current_result = None
             st.rerun()
     
-    with col2:
-        st.markdown("""
-        <div class="fade-in">
-            <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                📊 抽取统计
-            </h2>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.session_state.current_result:
-            result = st.session_state.current_result
-            subgraph = result.get("subgraph")
-            if subgraph:
-                # 使用卡片样式包装统计信息
-                st.markdown("""
-                <div style="background: rgba(255, 255, 255, 0.95); padding: 1.5rem; border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);">
-                """, unsafe_allow_html=True)
-                stat1, stat2, stat3 = st.columns(3)
-                with stat1:
-                    st.metric("🎯 实体数量", len(subgraph.nodes), delta=None)
-                with stat2:
-                    st.metric("🔗 关系数量", len(subgraph.edges), delta=None)
-                with stat3:
-                    entity_types = len(set(n.label for n in subgraph.nodes))
-                    st.metric("📋 实体类型", entity_types, delta=None)
-                st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); 
-                        padding: 3rem 2rem; border-radius: 15px; text-align: center; border: 2px dashed rgba(102, 126, 234, 0.3);">
-                <p style="font-size: 3rem; margin: 0;">👈</p>
-                <p style="color: #666; font-size: 1.1rem; margin-top: 1rem;">请输入文本并开始抽取</p>
-                <p style="color: #999; font-size: 0.9rem; margin-top: 0.5rem;">系统将自动识别实体和关系</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
     # 执行抽取
     if extract_button and input_text.strip():
         if not st.session_state.extractor:
-            st.error("❌ 请先初始化抽取器！")
+            st.error("❌ 抽取器初始化失败，请检查配置")
         else:
-            # 创建可折叠的进度展示区域
-            st.markdown("""
-            <div style="margin: 2rem 0;">
-                <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                    🔄 实时抽取监控
-                </h2>
-            </div>
-            """, unsafe_allow_html=True)
-            with st.expander("📊 点击展开/收起查看详细进度", expanded=True):
-                # 使用容器来组织进度显示
-                progress_container = st.container()
-                
-                with progress_container:
-                    # 进度条和状态
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    time_text = st.empty()
-                    st.markdown("---")
-                    
-                    # 日志区域
-                    st.markdown("""
-                    <div style="margin-top: 1rem;">
-                        <h4 style="color: #333; margin-bottom: 0.5rem;">
-                            📋 实时日志
-                        </h4>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    log_placeholder = st.empty()
-                
-                # 日志消息列表
-                log_messages = []
-                
-                def update_progress(current, total, message):
-                    """更新进度显示"""
-                    nonlocal log_messages
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]  # 精确到毫秒
-                    
-                    # 更新进度条
-                    progress_value = current / total if total > 0 else 0
-                    progress_bar.progress(progress_value)
-                    
-                    # 更新状态文本（使用更酷炫的样式）
-                    status_text.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); 
-                                padding: 1rem; border-radius: 10px; border-left: 4px solid #667eea;">
-                        <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #333;">
-                            <span style="color: #667eea;">🔄</span> <strong>当前状态</strong>: {message}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    time_text.markdown(f"""
-                    <p style="text-align: right; color: #999; font-size: 0.9rem; margin-top: 0.5rem;">
-                        ⏰ 最后更新: <span style="color: #667eea; font-weight: 600;">{timestamp}</span>
-                    </p>
-                    """, unsafe_allow_html=True)
-                    
-                    # 添加日志
-                    log_entry = f"[{timestamp}] {message}"
-                    log_messages.append(log_entry)
-                    
-                    # 更新日志显示（只显示最近30条，避免太长）
-                    with log_placeholder.container():
-                        recent_logs = "\n".join(log_messages[-30:])
-                        # 使用代码块显示日志，支持滚动，添加自定义样式
-                        st.markdown(f"""
-                        <div style="background: #1e1e1e; padding: 1rem; border-radius: 8px; max-height: 300px; overflow-y: auto;">
-                            <pre style="color: #d4d4d4; font-family: 'Courier New', monospace; font-size: 0.9rem; margin: 0; white-space: pre-wrap; word-wrap: break-word;">
-{recent_logs}
-                            </pre>
-                        </div>
-                        """, unsafe_allow_html=True)
-                
-                # 执行抽取
+            # 直接执行抽取，不显示过程
+            with st.spinner("正在抽取知识..."):
                 try:
                     subgraph, steps = extract_knowledge_step_by_step(
                         st.session_state.extractor,
                         input_text,
-                        "用户输入",
-                        progress_callback=update_progress
+                        "用户输入"
                     )
-                    
-                    # 最终状态更新
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                    if subgraph:
-                        progress_bar.progress(1.0)
-                        status_text.markdown(f"""
-                        <div style="background: linear-gradient(135deg, rgba(76, 175, 80, 0.2) 0%, rgba(76, 175, 80, 0.3) 100%); 
-                                    padding: 1rem; border-radius: 10px; border-left: 4px solid #4caf50;">
-                            <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #2e7d32;">
-                                ✅ <strong>抽取完成！</strong> 识别了 <span style="color: #667eea;">{len(subgraph.nodes)}</span> 个实体和 
-                                <span style="color: #667eea;">{len(subgraph.edges)}</span> 条关系
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        log_messages.append(f"[{timestamp}] ✅ 抽取完成！")
-                        st.balloons()  # 成功动画
-                    else:
-                        status_text.markdown("""
-                        <div style="background: linear-gradient(135deg, rgba(255, 152, 0, 0.2) 0%, rgba(255, 152, 0, 0.3) 100%); 
-                                    padding: 1rem; border-radius: 10px; border-left: 4px solid #ff9800;">
-                            <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #f57c00;">
-                                ⚠️ 抽取完成，但未生成图谱
-                            </p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        log_messages.append(f"[{timestamp}] ⚠️ 抽取完成，但未生成图谱")
-                    
-                    time_text.markdown(f"""
-                    <p style="text-align: right; color: #999; font-size: 0.9rem; margin-top: 0.5rem;">
-                        ⏰ 完成时间: <span style="color: #667eea; font-weight: 600;">{timestamp}</span>
-                    </p>
-                    """, unsafe_allow_html=True)
-                    
                 except Exception as e:
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                    status_text.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(244, 67, 54, 0.2) 0%, rgba(244, 67, 54, 0.3) 100%); 
-                                padding: 1rem; border-radius: 10px; border-left: 4px solid #f44336;">
-                        <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #c62828;">
-                            ❌ <strong>抽取失败</strong>: {str(e)}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    log_messages.append(f"[{timestamp}] ❌ 错误: {str(e)}")
-                    import traceback
-                    error_details = traceback.format_exc()
-                    log_messages.append(f"[{timestamp}] 详细错误:\n{error_details}")
-                    st.error(f"抽取过程出错: {e}")
+                    st.error(f"抽取失败: {e}")
                     subgraph, steps = None, []
-            
-            # 显示抽取步骤（在可折叠区域中）
-            if steps:
-                st.markdown("""
-                <div style="margin: 2rem 0;">
-                    <h3 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                        📋 抽取步骤详情
-                    </h3>
-                </div>
-                """, unsafe_allow_html=True)
-                with st.expander("🔍 点击查看详细步骤信息", expanded=False):
-                    for step in steps:
-                        step_status = step.get("status", "unknown")
-                        status_icon = {
-                            "completed": "✅",
-                            "running": "🔄",
-                            "error": "❌"
-                        }.get(step_status, "⏳")
-                        
-                        # 根据状态设置颜色
-                        status_color = {
-                            "completed": "#4caf50",
-                            "running": "#667eea",
-                            "error": "#f44336"
-                        }.get(step_status, "#999")
-                        
-                        st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); 
-                                    padding: 1rem; border-radius: 10px; border-left: 4px solid {status_color}; margin: 0.5rem 0;">
-                            <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">
-                                {status_icon} <span style="color: {status_color};">步骤 {step['step']}: {step['name']}</span>
-                            </p>
-                            <p style="margin: 0.5rem 0 0 0; color: #666;">{step['description']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        if step.get("entities"):
-                            st.markdown("**🎯 识别的实体:**")
-                            entity_cols = st.columns(min(4, len(step["entities"])))
-                            for i, entity in enumerate(step["entities"]):
-                                with entity_cols[i % 4]:
-                                    st.markdown(f"""
-                                    <div style="background: rgba(102, 126, 234, 0.1); padding: 0.75rem; border-radius: 8px; 
-                                                border-left: 3px solid #667eea; margin: 0.25rem 0;">
-                                        <p style="margin: 0; font-weight: 600; color: #333;">{entity['name']}</p>
-                                        <p style="margin: 0.25rem 0 0 0; font-size: 0.85rem; color: #667eea;">{entity['type']}</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                        
-                        if step.get("relations"):
-                            st.markdown("**🔗 抽取的关系:**")
-                            for rel in step["relations"][:10]:  # 限制显示
-                                st.markdown(f"""
-                                <div style="background: #1e1e1e; padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0;">
-                                    <code style="color: #4caf50; font-size: 0.9rem;">
-                                        {rel['from']} <span style="color: #667eea;">--[{rel['label']}]--></span> {rel['to']}
-                                    </code>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        st.markdown("<br>", unsafe_allow_html=True)
             
             # 保存结果
             if subgraph:
-                st.session_state.current_result = {
+                result_data = {
                     "subgraph": subgraph,
                     "source_text": input_text,
                     "steps": steps,
                     "timestamp": time.time()
                 }
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, rgba(76, 175, 80, 0.2) 0%, rgba(76, 175, 80, 0.3) 100%); 
-                            padding: 1rem; border-radius: 10px; border-left: 4px solid #4caf50; margin: 1rem 0;">
-                    <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #2e7d32;">
-                        ✅ 抽取成功！结果已生成。
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="background: linear-gradient(135deg, rgba(255, 152, 0, 0.2) 0%, rgba(255, 152, 0, 0.3) 100%); 
-                            padding: 1rem; border-radius: 10px; border-left: 4px solid #ff9800; margin: 1rem 0;">
-                    <p style="margin: 0; font-size: 1.1rem; font-weight: 600; color: #f57c00;">
-                        ⚠️ 抽取完成，但未生成图谱。
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
+                st.session_state.current_result = result_data
     
     # 显示结果
     if st.session_state.current_result:
@@ -1082,13 +1147,13 @@ def main():
                 <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
                     🎨 知识图谱可视化
                 </h2>
-                <p style="text-align: center; color: #666; margin-top: -0.5rem;">
+                <p style="text-align: center; color: rgba(255, 255, 255, 0.9); margin-top: -0.5rem;">
                     交互式图谱展示 | 实体关系可视化 | 原文高亮对应
                 </p>
             </div>
             """, unsafe_allow_html=True)
             
-            # 生成可视化
+            # 生成可视化（可视化文件保存到visualizations目录，不影响主知识库）
             output_dir = Path(__file__).parent / "visualizations"
             output_dir.mkdir(exist_ok=True)
             
@@ -1103,17 +1168,12 @@ def main():
                         output_path=str(output_file.with_suffix(''))
                     )
                 
-                # 显示HTML文件（添加边框和阴影效果）
-                st.markdown("""
-                <div style="background: white; padding: 1rem; border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); margin: 1rem 0;">
-                """, unsafe_allow_html=True)
-                
+                # 显示HTML文件（直接嵌入页面，不使用iframe滚动）
                 with open(output_file, 'r', encoding='utf-8') as f:
                     html_content = f.read()
                 
-                st.components.v1.html(html_content, height=800, scrolling=True)
-                
-                st.markdown("</div>", unsafe_allow_html=True)
+                # 直接显示HTML内容，不使用iframe的滚动条
+                st.components.v1.html(html_content, height=800, scrolling=False)
                 
                 # 下载按钮（使用更酷炫的样式）
                 col_dl1, col_dl2, col_dl3 = st.columns([1, 2, 1])
@@ -1132,6 +1192,464 @@ def main():
                 st.error(f"生成可视化失败: {e}")
                 import traceback
                 st.error(traceback.format_exc())
+            
+            # 显示原始数据
+            with st.expander("📄 查看原始数据（JSON格式）"):
+                st.json({
+                    "nodes": [
+                        {
+                            "id": n.id,
+                            "name": n.name,
+                            "type": n.label,
+                            "properties": n.properties
+                        }
+                        for n in subgraph.nodes
+                    ],
+                    "edges": [
+                        {
+                            "from": e.from_id,
+                            "to": e.to_id,
+                            "label": e.label,
+                            "properties": e.properties
+                        }
+                        for e in subgraph.edges
+                    ]
+                })
+    
+    # 标签页2: 主知识库展示
+    with tab2:
+        st.markdown("""
+        <div class="fade-in">
+            <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
+                📊 主知识库展示
+            </h2>
+            <p style="text-align: center; color: #666; margin-top: -0.5rem;">
+                浏览主知识库 | 可视化展示所有实体和关系
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 检查checkpoint目录
+        project_path = Path(__file__).parent
+        ckpt_dir = project_path / "builder" / "ckpt"
+        
+        # 初始化状态
+        if 'main_kb_subgraph' not in st.session_state:
+            st.session_state.main_kb_subgraph = None
+        
+        # 加载主知识库数据
+        if ckpt_dir.exists() and st.session_state.main_kb_subgraph is None:
+            subgraph = load_main_knowledge_base(ckpt_dir)
+            if subgraph:
+                st.session_state.main_kb_subgraph = subgraph
+        
+        # 刷新按钮
+        if st.button("🔄 刷新主知识库", type="primary", use_container_width=True, key="refresh_main_kb"):
+            if ckpt_dir.exists():
+                subgraph = load_main_knowledge_base(ckpt_dir)
+                if subgraph:
+                    st.session_state.main_kb_subgraph = subgraph
+                    # 清除可视化缓存，强制重新生成
+                    cache_file = Path(__file__).parent / "visualizations" / "main_kb_visualization.html"
+                    if cache_file.exists():
+                        cache_file.unlink()
+        
+        # 显示主知识库数据
+        subgraph = st.session_state.main_kb_subgraph
+        
+        if subgraph is None:
+            st.info("💡 未找到主知识库数据，请确保已构建知识库。")
+        elif not subgraph.nodes and not subgraph.edges:
+            st.warning("⚠️ 主知识库为空，没有实体和关系数据。")
+        else:
+            # 统计信息
+            st.markdown("---")
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            with col_stat1:
+                st.metric("🎯 实体总数", len(subgraph.nodes), delta=None)
+            with col_stat2:
+                st.metric("🔗 关系总数", len(subgraph.edges), delta=None)
+            with col_stat3:
+                entity_types = len(set(n.label for n in subgraph.nodes)) if subgraph.nodes else 0
+                st.metric("📋 实体类型", entity_types, delta=None)
+            with col_stat4:
+                relation_types = len(set(e.label for e in subgraph.edges)) if subgraph.edges else 0
+                st.metric("🔖 关系类型", relation_types, delta=None)
+            
+            # 筛选和搜索控件
+            st.markdown("---")
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                search_term = st.text_input(
+                    "🔍 搜索实体",
+                    value=st.session_state.main_kb_search_term,
+                    placeholder="输入实体名称进行搜索...",
+                    key="main_kb_search_input"
+                )
+                if search_term != st.session_state.main_kb_search_term:
+                    st.session_state.main_kb_search_term = search_term
+                    st.rerun()
+            
+            with col2:
+                if st.button("🔄 重置筛选", key="reset_main_kb_filters"):
+                    st.session_state.main_kb_selected_entity_types = []
+                    st.session_state.main_kb_selected_relation_types = []
+                    st.session_state.main_kb_search_term = ""
+                    st.rerun()
+            
+            # 筛选控件
+            col1, col2 = st.columns(2)
+            with col1:
+                # 实体类型筛选
+                all_entity_types = sorted(set([str(n.label) for n in subgraph.nodes if n.label]))
+                selected_entity_types = st.multiselect(
+                    "筛选实体类型",
+                    options=all_entity_types,
+                    default=st.session_state.main_kb_selected_entity_types,
+                    key="main_kb_entity_type_filter"
+                )
+                if selected_entity_types != st.session_state.main_kb_selected_entity_types:
+                    st.session_state.main_kb_selected_entity_types = selected_entity_types
+                    st.rerun()
+            
+            with col2:
+                # 关系类型筛选
+                all_relation_types = sorted(set([str(e.label) for e in subgraph.edges if e.label]))
+                selected_relation_types = st.multiselect(
+                    "筛选关系类型",
+                    options=all_relation_types,
+                    default=st.session_state.main_kb_selected_relation_types,
+                    key="main_kb_relation_type_filter"
+                )
+                if selected_relation_types != st.session_state.main_kb_selected_relation_types:
+                    st.session_state.main_kb_selected_relation_types = selected_relation_types
+                    st.rerun()
+            
+            # 应用筛选和搜索
+            filtered_nodes = list(subgraph.nodes)
+            filtered_edges = list(subgraph.edges)
+            
+            # 实体类型筛选
+            if st.session_state.main_kb_selected_entity_types:
+                filtered_nodes = [
+                    n for n in filtered_nodes
+                    if str(n.label) in st.session_state.main_kb_selected_entity_types
+                ]
+                # 只显示与筛选实体相关的边
+                filtered_node_ids = set([str(n.id) for n in filtered_nodes])
+                filtered_edges = [
+                    e for e in filtered_edges
+                    if str(e.from_id) in filtered_node_ids and str(e.to_id) in filtered_node_ids
+                ]
+            
+            # 关系类型筛选
+            if st.session_state.main_kb_selected_relation_types:
+                filtered_edges = [
+                    e for e in filtered_edges
+                    if str(e.label) in st.session_state.main_kb_selected_relation_types
+                ]
+                # 只显示与筛选关系相关的实体
+                related_node_ids = set()
+                for e in filtered_edges:
+                    related_node_ids.add(str(e.from_id))
+                    related_node_ids.add(str(e.to_id))
+                filtered_nodes = [
+                    n for n in filtered_nodes
+                    if str(n.id) in related_node_ids
+                ]
+            
+            # 搜索筛选
+            if st.session_state.main_kb_search_term:
+                search_lower = st.session_state.main_kb_search_term.lower()
+                filtered_nodes = [
+                    n for n in filtered_nodes
+                    if search_lower in str(n.name).lower() or search_lower in str(n.id).lower()
+                ]
+                filtered_node_ids = set([str(n.id) for n in filtered_nodes])
+                filtered_edges = [
+                    e for e in filtered_edges
+                    if str(e.from_id) in filtered_node_ids and str(e.to_id) in filtered_node_ids
+                ]
+            
+            st.write(f"**显示**: {len(filtered_nodes)} 个实体, {len(filtered_edges)} 个关系")
+            
+            # 可视化
+            st.markdown("---")
+            st.markdown("""
+            <div class="fade-in" style="margin: 2rem 0;">
+                <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
+                    🎨 知识图谱可视化
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 使用pyvis创建交互式可视化（使用筛选后的数据）
+            if filtered_nodes or filtered_edges:
+                try:
+                    from pyvis.network import Network
+                    import tempfile
+                    import os
+                    
+                    # 创建网络图
+                    net = Network(
+                        height="600px",
+                        width="100%",
+                        bgcolor="#222222",
+                        font_color="white",
+                        directed=True
+                    )
+                    
+                    # 实体类型颜色映射
+                    entity_type_colors = {
+                        "MilitaryUnit": "#FF6B6B",
+                        "TerrainFeature": "#4ECDC4",
+                        "Weapon": "#FFE66D",
+                        "Obstacle": "#95E1D3",
+                        "DefensePosition": "#F38181",
+                        "CombatPosition": "#AA96DA",
+                        "UnitOrganization": "#FCBAD3",
+                        "CombatTask": "#A8E6CF",
+                        "FireSupport": "#FFD3A5",
+                        "ObservationPost": "#FD9853",
+                        "KillZone": "#A8DADC",
+                        "ObstacleBelt": "#457B9D",
+                        "SupportPoint": "#E63946",
+                        "ApproachRoute": "#F1FAEE"
+                    }
+                    
+                    # 添加节点（使用筛选后的节点）
+                    entity_map = {}
+                    for node in filtered_nodes:
+                        entity_id = str(node.id)
+                        entity_name = str(node.name) if node.name else entity_id
+                        entity_type = str(node.label) if node.label else "Unknown"
+                        color = entity_type_colors.get(entity_type, "#888888")
+                        
+                        # 构建节点标题（显示详细信息）
+                        title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
+                        if node.properties:
+                            title += "<br>属性:"
+                            for key, value in list(node.properties.items())[:5]:  # 只显示前5个属性
+                                title += f"<br>  {key}: {value}"
+                        
+                        net.add_node(
+                            entity_id,
+                            label=entity_name[:20],  # 限制标签长度
+                            title=title,
+                            color=color,
+                            size=20
+                        )
+                        entity_map[entity_id] = node
+                    
+                    # 添加边（使用筛选后的边）
+                    for edge in filtered_edges:
+                        source = str(edge.from_id)
+                        target = str(edge.to_id)
+                        relation_type = str(edge.label) if edge.label else "Unknown"
+                        
+                        if source in entity_map and target in entity_map:
+                            net.add_edge(
+                                source,
+                                target,
+                                label=relation_type[:15],  # 限制标签长度
+                                title=relation_type,
+                                color="#888888",
+                                width=2
+                            )
+                    
+                    # 配置物理引擎 - 先稳定布局，然后禁用让图保持静止
+                    net.set_options("""
+                    {
+                      "physics": {
+                        "enabled": true,
+                        "barnesHut": {
+                          "gravitationalConstant": -2000,
+                          "centralGravity": 0.1,
+                          "springLength": 200,
+                          "springConstant": 0.04,
+                          "damping": 0.09
+                        },
+                        "stabilization": {
+                          "enabled": true,
+                          "iterations": 200,
+                          "updateInterval": 25,
+                          "onlyDynamicEdges": false,
+                          "fit": true
+                        },
+                        "adaptiveTimestep": true,
+                        "maxVelocity": 50
+                      },
+                      "interaction": {
+                        "hover": true,
+                        "tooltipDelay": 200,
+                        "zoomView": true,
+                        "dragView": true,
+                        "dragNodes": true
+                      }
+                    }
+                    """)
+                    
+                    # 生成HTML到临时文件
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
+                        net.save_graph(html_file.name)
+                        html_path = html_file.name
+                    
+                    # 读取HTML内容并修改，添加稳定后自动禁用物理引擎的代码
+                    try:
+                        with open(html_path, "r", encoding="utf-8") as f:
+                            html_content = f.read()
+                        
+                        # 在network初始化后添加监听器，稳定后自动禁用物理引擎
+                        # 查找network初始化代码的位置
+                        if "new vis.Network" in html_content:
+                            # 在network创建后添加事件监听器
+                            replacement = """var network = new vis.Network(container, data, options);
+                    network.once("stabilizationIterationsDone", function() {
+                      network.setOptions({physics: {enabled: false}});
+                    });"""
+                            html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
+                        
+                        # 在Streamlit中显示
+                        st.components.v1.html(html_content, height=650, scrolling=False)
+                    finally:
+                        # 清理临时文件
+                        try:
+                            os.unlink(html_path)
+                        except:
+                            pass
+                    
+                    # 原文对照部分 - 使用分段卡片展示（在try块内，finally块之后）
+                    st.markdown("---")
+                    st.subheader("📝 节点原文")
+                    
+                    # 提取原文信息
+                    def extract_source_text(node_or_edge):
+                        """从节点或关系中提取原文信息"""
+                        source_texts = []
+                        properties = node_or_edge.properties if hasattr(node_or_edge, 'properties') else {}
+                        
+                        # 常见的原文字段
+                        text_fields = ["desc", "description", "content", "text", "ruleContent", "ruleName", "source_text"]
+                        
+                        for field in text_fields:
+                            if field in properties:
+                                value = properties[field]
+                                if value and isinstance(value, str) and value.strip():
+                                    source_texts.append(value)
+                        
+                        # 如果没有找到常见的原文字段，尝试显示所有文本类型的属性
+                        if not source_texts:
+                            for key, value in properties.items():
+                                if isinstance(value, str) and len(value) > 10:  # 只显示较长的文本
+                                    source_texts.append(value)
+                        
+                        return source_texts
+                    
+                    # 收集所有节点的原文（使用筛选后的节点）
+                    node_texts = []
+                    for node in filtered_nodes:
+                        entity_name = str(node.name) if node.name else str(node.id)
+                        entity_type = str(node.label) if node.label else "Unknown"
+                        source_texts = extract_source_text(node)
+                        
+                        for text in source_texts:
+                            node_texts.append({
+                                "entity_name": entity_name,
+                                "entity_type": entity_type,
+                                "text": text
+                            })
+                    
+                    # 分页显示（类似图片中的样式）
+                    if node_texts:
+                        # 每页显示数量
+                        items_per_page = 5
+                        total_pages = (len(node_texts) + items_per_page - 1) // items_per_page
+                        
+                        if 'main_kb_text_page' not in st.session_state:
+                            st.session_state.main_kb_text_page = 1
+                        
+                        # 获取当前页的数据
+                        page = st.session_state.main_kb_text_page
+                        start_idx = (page - 1) * items_per_page
+                        end_idx = min(start_idx + items_per_page, len(node_texts))
+                        current_page_texts = node_texts[start_idx:end_idx]
+                        
+                        # 显示当前页的分段（使用卡片样式）
+                        for idx, text_item in enumerate(current_page_texts, start=start_idx + 1):
+                            # 使用markdown创建卡片样式
+                            st.markdown(f"""
+                            <div style="background: rgba(255, 255, 255, 0.95); 
+                                        border-radius: 8px; 
+                                        padding: 1rem; 
+                                        margin: 0.5rem 0; 
+                                        border-left: 4px solid #667eea;
+                                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+                                    <strong>{text_item['entity_name']}</strong> ({text_item['entity_type']})
+                                </div>
+                                <div style="color: #333; line-height: 1.6;">
+                                    {text_item['text']}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # 分页控件
+                        if total_pages > 1:
+                            col1, col2, col3 = st.columns([1, 2, 1])
+                            with col2:
+                                page_cols = st.columns(min(7, total_pages + 2))  # 最多显示7个按钮
+                            
+                            # 上一页按钮
+                            if page > 1:
+                                with page_cols[0]:
+                                    if st.button("←", key="prev_page_text"):
+                                        st.session_state.main_kb_text_page = page - 1
+                                        st.rerun()
+                            
+                            # 页码按钮（最多显示5页）
+                            max_display_pages = 5
+                            if total_pages <= max_display_pages:
+                                display_pages = list(range(1, total_pages + 1))
+                            else:
+                                if page <= 3:
+                                    display_pages = list(range(1, max_display_pages + 1))
+                                elif page >= total_pages - 2:
+                                    display_pages = list(range(total_pages - max_display_pages + 1, total_pages + 1))
+                                else:
+                                    display_pages = list(range(page - 2, page + 3))
+                            
+                            for i, p in enumerate(display_pages):
+                                col_idx = (i + 1) if page > 1 else i
+                                if col_idx < len(page_cols):
+                                    with page_cols[col_idx]:
+                                        if st.button(str(p), key=f"page_{p}_text", disabled=(p == page)):
+                                            if p != page:
+                                                st.session_state.main_kb_text_page = p
+                                                st.rerun()
+                            
+                            # 下一页按钮
+                            if page < total_pages:
+                                next_col_idx = len(display_pages) + (1 if page > 1 else 0)
+                                if next_col_idx < len(page_cols):
+                                    with page_cols[next_col_idx]:
+                                        if st.button("→", key="next_page_text"):
+                                            st.session_state.main_kb_text_page = page + 1
+                                            st.rerun()
+                        
+                        # 提示信息
+                        st.caption(f"最多展示{max_display_pages}页分段，若内容过多，可能无法展示所有分段")
+                    else:
+                        st.info("暂无节点原文内容")
+                        
+                except ImportError:
+                    st.error("pyvis库未安装，请运行: pip install pyvis")
+                    st.code("pip install pyvis", language="bash")
+                except Exception as e:
+                    st.error(f"生成可视化失败: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            else:
+                st.info("没有数据可显示。请调整筛选条件。")
             
             # 显示原始数据
             with st.expander("📄 查看原始数据（JSON格式）"):

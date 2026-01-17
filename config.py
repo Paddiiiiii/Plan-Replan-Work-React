@@ -4,8 +4,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 LLM_CONFIG = {
-    "api_endpoint": "http://192.168.1.200:11434/v1/chat/completions",
-    "model": "qwen3:32b",
+    "api_endpoint": "https://api.deepseek.com/v1/chat/completions",
+    "api_key": "sk-667fd9da7e8049e6ac13a8d7eae93288",  # DeepSeek API Key
+    "model": "deepseek-chat",
     "temperature": 0.7,
     "max_tokens": 8192,  # 增加到8192以确保JSON完整输出
     "top_p": 1.0,
