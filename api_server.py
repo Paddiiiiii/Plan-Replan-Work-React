@@ -364,6 +364,9 @@ async def kag_query(request: Dict = Body(...)):
             "success": True,
             "answer": result.get("answer", ""),
             "references": result.get("references", []),
+            "source_texts": result.get("source_texts", []),  # 检索到的原文
+            "tasks": result.get("tasks", []),  # 推理任务列表
+            "input_query": result.get("input_query", question),
             "method": result.get("method", "kag_reasoning")
         }
     except Exception as e:

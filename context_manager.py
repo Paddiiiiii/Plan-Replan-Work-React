@@ -410,26 +410,109 @@ class ContextManager:
             question: 用户问题
             
         Returns:
-            包含答案和引用的字典
+            包含答案、引用和检索原文的字典
         """
         if not self.kag_solver:
             logger.warning("KAG推理器未初始化")
             return {
                 "answer": "",
                 "references": [],
+                "source_texts": [],
                 "error": "KAG推理器未初始化"
             }
         
         try:
-            # 先获取上下文
-            context = self.load_dynamic_context(question, top_k=3)
-            result = self.kag_solver.query_with_context(question, context)
+            # 直接调用KAG推理，不先获取上下文（避免两次推理）
+            result = self.kag_solver.query(question)
+            
+            # 从tasks中提取检索到的原文（chunks）
+            source_texts = []
+            tasks = result.get("tasks", [])
+            for task in tasks:
+                task_memory = task.get("memory", {})
+                # 从memory中提取retriever结果
+                if "retriever" in task_memory:
+                    retriever_output = task_memory["retriever"]
+                    # 处理RetrieverOutput对象（可能已经被序列化为字典）
+                    if isinstance(retriever_output, dict):
+                        # 如果是字典格式（序列化后的RetrieverOutput）
+                        chunks = retriever_output.get("chunks", [])
+                        for chunk in chunks:
+                            if isinstance(chunk, dict):
+                                # chunk.to_dict() 返回的格式
+                                content = chunk.get("content", chunk.get("text", ""))
+                                if not content:
+                                    # 尝试从其他字段获取
+                                    content = chunk.get("chunk_content", chunk.get("desc", str(chunk)))
+                                if content:
+                                    source_texts.append({
+                                        "text": content,
+                                        "metadata": chunk.get("metadata", chunk.get("chunk_metadata", {})),
+                                        "source": "kag_retriever"
+                                    })
+                    elif hasattr(retriever_output, "chunks"):
+                        # 如果是RetrieverOutput对象
+                        for chunk in retriever_output.chunks:
+                            if hasattr(chunk, "content"):
+                                source_texts.append({
+                                    "text": chunk.content,
+                                    "metadata": chunk.metadata if hasattr(chunk, "metadata") else {},
+                                    "source": "kag_retriever"
+                                })
+                            elif hasattr(chunk, "to_dict"):
+                                chunk_dict = chunk.to_dict()
+                                content = chunk_dict.get("content", chunk_dict.get("text", ""))
+                                if content:
+                                    source_texts.append({
+                                        "text": content,
+                                        "metadata": chunk_dict.get("metadata", {}),
+                                        "source": "kag_retriever"
+                                    })
+                # 也检查task.result中是否有RetrieverOutput
+                task_result = task.get("result")
+                if task_result:
+                    if isinstance(task_result, dict):
+                        # 如果是字典格式
+                        if "chunks" in task_result:
+                            chunks = task_result["chunks"]
+                            for chunk in chunks:
+                                if isinstance(chunk, dict):
+                                    content = chunk.get("content", chunk.get("text", ""))
+                                    if content:
+                                        source_texts.append({
+                                            "text": content,
+                                            "metadata": chunk.get("metadata", {}),
+                                            "source": "kag_retriever"
+                                        })
+                    elif hasattr(task_result, "chunks"):
+                        # 如果是RetrieverOutput对象
+                        for chunk in task_result.chunks:
+                            if hasattr(chunk, "content"):
+                                source_texts.append({
+                                    "text": chunk.content,
+                                    "metadata": chunk.metadata if hasattr(chunk, "metadata") else {},
+                                    "source": "kag_retriever"
+                                })
+            
+            # 去重（基于文本内容）
+            seen_texts = set()
+            unique_source_texts = []
+            for source in source_texts:
+                text = source.get("text", "")
+                if text and text not in seen_texts:
+                    seen_texts.add(text)
+                    unique_source_texts.append(source)
+            
+            # 添加source_texts到结果中
+            result["source_texts"] = source_texts
+            
             return result
         except Exception as e:
             logger.error(f"KAG推理查询失败: {e}", exc_info=True)
             return {
                 "answer": "",
                 "references": [],
+                "source_texts": [],
                 "error": str(e)
             }
 

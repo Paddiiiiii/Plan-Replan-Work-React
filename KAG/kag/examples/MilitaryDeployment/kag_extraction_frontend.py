@@ -4,14 +4,12 @@
 支持输入文本并实时进行知识抽取，展示抽取过程和结果
 
 使用方法:
-    方式1: python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
-    方式2: streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0 (如果streamlit在PATH中)
+    python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0
     
-    注意: 默认端口已配置为9501（避免与外层系统的8501冲突），已配置允许局域网访问
-    
-或者使用启动脚本（推荐）:
-    Windows: 双击运行 run_extraction_frontend.bat
-    Linux/Mac: ./run_extraction_frontend.sh
+    注意: 
+    - 默认端口已配置为9501（避免与外层系统的8501冲突）
+    - 已配置允许局域网访问（0.0.0.0）
+    - 页面会自动重定向到127.0.0.1:9501（本机访问）
 """
 import os
 import sys
@@ -29,12 +27,9 @@ if __name__ == "__main__" and "streamlit" not in sys.modules:
     print("错误: 请使用 streamlit 命令启动此应用")
     print("=" * 60)
     print("\n正确的启动方式:")
-    print("  方式1: python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0")
-    print("  方式2: streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0 (如果streamlit在PATH中)")
+    print("  python -m streamlit run kag_extraction_frontend.py --server.port 9501 --server.address=0.0.0.0")
     print("\n  注意: 默认端口已配置为9501（避免与外层系统的8501冲突），已配置允许局域网访问")
-    print("\n或者使用启动脚本（推荐）:")
-    print("  Windows: 双击运行 run_extraction_frontend.bat")
-    print("  Linux/Mac: ./run_extraction_frontend.sh")
+    print("        页面会自动重定向到127.0.0.1:9501（本机访问）")
     print("=" * 60)
     sys.exit(1)
 
@@ -52,6 +47,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 
 # 注入自定义CSS样式
 st.markdown("""
@@ -378,6 +374,71 @@ st.markdown("""
         animation: spin 2s linear infinite;
     }
     
+    /* Multiselect下拉框样式 */
+    [data-baseweb="select"] {
+        background: rgba(255, 255, 255, 0.15) !important;
+        border-radius: 8px !important;
+    }
+    
+    [data-baseweb="select"] > div {
+        background: rgba(255, 255, 255, 0.15) !important;
+        color: #f7fafc !important;
+    }
+    
+    /* Multiselect下拉框选项样式 */
+    [data-baseweb="popover"] {
+        background: rgba(255, 255, 255, 0.98) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 8px !important;
+    }
+    
+    [data-baseweb="menu"] {
+        background: rgba(255, 255, 255, 0.98) !important;
+    }
+    
+    [data-baseweb="menu"] ul {
+        background: rgba(255, 255, 255, 0.98) !important;
+    }
+    
+    [data-baseweb="menu"] li {
+        background: rgba(255, 255, 255, 0.98) !important;
+        color: #2d3748 !important;
+    }
+    
+    [data-baseweb="menu"] li:hover {
+        background: rgba(102, 126, 234, 0.2) !important;
+        color: #2d3748 !important;
+    }
+    
+    [data-baseweb="menu"] li[aria-selected="true"] {
+        background: rgba(102, 126, 234, 0.3) !important;
+        color: #2d3748 !important;
+    }
+    
+    /* Multiselect选项文本颜色 */
+    [data-baseweb="menu"] li span,
+    [data-baseweb="menu"] li div {
+        color: #2d3748 !important;
+    }
+    
+    /* Multiselect标签样式 */
+    [data-baseweb="tag"] {
+        background: rgba(102, 126, 234, 0.3) !important;
+        color: #f7fafc !important;
+        border: 1px solid rgba(102, 126, 234, 0.5) !important;
+    }
+    
+    /* Multiselect输入框文本颜色 */
+    [data-baseweb="select"] input,
+    [data-baseweb="select"] span {
+        color: #f7fafc !important;
+    }
+    
+    /* Multiselect占位符文本 */
+    [data-baseweb="select"] input::placeholder {
+        color: rgba(247, 250, 252, 0.6) !important;
+    }
+    
     /* 成功/错误/警告消息样式 */
     .stSuccess {
         background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(76, 175, 80, 0.2) 100%) !important;
@@ -552,7 +613,8 @@ def init_extractor():
 
 
 def extract_knowledge_step_by_step(extractor, text: str, title: str = "输入文本", progress_callback=None):
-    """逐步执行知识抽取，返回每个步骤的结果"""
+    """执行知识抽取，返回结果"""
+    # 不再构建步骤信息，直接返回空列表
     steps = []
     
     try:
@@ -573,210 +635,7 @@ def extract_knowledge_step_by_step(extractor, text: str, title: str = "输入文
             type=ChunkTypeEnum.Text
         )
         
-        passage = f"{chunk_title}\n{text}"
-        
-        # 步骤1: 实体识别
-        step1 = {
-            "step": 1,
-            "name": "实体识别 (NER)",
-            "status": "running",
-            "description": "正在识别文本中的实体...",
-            "entities": [],
-            "timestamp": time.time()
-        }
-        steps.append(step1)
-        if progress_callback:
-            progress_callback(1, 4, "步骤 1/4: 实体识别...")
-        
-        # 执行实体识别
-        entities = []
-        if hasattr(extractor, 'named_entity_recognition'):
-            try:
-                if progress_callback:
-                    progress_callback(1, 4, "步骤 1/4: 正在进行实体识别...")
-                entities = extractor.named_entity_recognition(passage)
-                # 确保entities是列表
-                if entities is None:
-                    entities = []
-                elif not isinstance(entities, list):
-                    if progress_callback:
-                        progress_callback(1, 4, f"⚠️ 实体识别返回了非列表类型: {type(entities)}，正在转换...")
-                    entities = [entities] if entities else []
-                else:
-                    if progress_callback:
-                        progress_callback(1, 4, f"✅ 实体识别完成，识别出 {len(entities)} 个实体")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(1, 4, f"❌ 实体识别失败: {str(e)}，改用完整抽取流程")
-                entities = []
-        
-        # 如果没有获取到实体，使用完整抽取流程
-        if not entities:
-            if progress_callback:
-                progress_callback(1, 4, "🔄 使用完整抽取流程（invoke方法）...")
-            # 直接调用invoke获取完整结果
-            results = extractor.invoke(chunk)
-            if results and len(results) > 0:
-                result_item = results[0]
-                # 处理 BuilderComponentData 包装
-                if hasattr(result_item, 'data'):
-                    subgraph = result_item.data
-                else:
-                    subgraph = result_item
-                
-                # 确保是 SubGraph 对象
-                if not hasattr(subgraph, 'nodes'):
-                    st.error(f"返回结果类型错误: {type(subgraph)}")
-                    return None, steps
-                
-                entities = [{"name": n.name, "category": n.label} for n in subgraph.nodes]
-                # 如果已经获取到完整结果，直接返回
-                steps[-1]["status"] = "completed"
-                steps[-1]["description"] = f"识别出 {len(entities)} 个实体"
-                steps[-1]["entities"] = [
-                    {"name": e.get("name", ""), "type": e.get("category", "")}
-                    for e in entities[:20]
-                ]
-                
-                # 添加关系信息
-                steps.append({
-                    "step": 2,
-                    "name": "关系抽取",
-                    "status": "completed",
-                    "description": f"抽取了 {len(subgraph.edges)} 条关系",
-                    "relations": [
-                        {
-                            "from": e.from_id,
-                            "to": e.to_id,
-                            "label": e.label
-                        }
-                        for e in subgraph.edges[:20]
-                    ],
-                    "timestamp": time.time()
-                })
-                
-                # 添加图谱构建信息
-                steps.append({
-                    "step": 3,
-                    "name": "图谱构建",
-                    "status": "completed",
-                    "description": f"构建包含 {len(subgraph.nodes)} 个节点和 {len(subgraph.edges)} 条边的知识图谱",
-                    "timestamp": time.time()
-                })
-                
-                if progress_callback:
-                    progress_callback(3, 3, "✅ 抽取完成！")
-                
-                return subgraph, steps
-        
-        step1["status"] = "completed"
-        step1["description"] = f"识别出 {len(entities)} 个实体"
-        step1["entities"] = [
-            {"name": e.get("name", ""), "type": e.get("category", "")}
-            for e in entities[:20]
-        ]
-        
-        # 步骤2: 实体标准化
-        step2 = {
-            "step": 2,
-            "name": "实体标准化",
-            "status": "running",
-            "description": "正在标准化实体名称...",
-            "timestamp": time.time()
-        }
-        steps.append(step2)
-        if progress_callback:
-            progress_callback(2, 4, "步骤 2/4: 实体标准化...")
-        
-        # 执行实体标准化
-        std_entities = []
-        named_entities = [{"name": e.get("name", ""), "category": e.get("category", "")} for e in entities]
-        if hasattr(extractor, 'named_entity_standardization'):
-            try:
-                if progress_callback:
-                    progress_callback(2, 4, f"步骤 2/4: 正在标准化 {len(named_entities)} 个实体...")
-                std_entities = extractor.named_entity_standardization(passage, named_entities)
-                if progress_callback:
-                    progress_callback(2, 4, f"✅ 实体标准化完成，标准化了 {len(std_entities) if std_entities else len(entities)} 个实体")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(2, 4, f"⚠️ 实体标准化失败: {str(e)}")
-        elif hasattr(extractor, '_named_entity_standardization_llm'):
-            try:
-                if progress_callback:
-                    progress_callback(2, 4, f"步骤 2/4: 正在标准化 {len(named_entities)} 个实体...")
-                std_entities = extractor._named_entity_standardization_llm(passage, named_entities)
-                if progress_callback:
-                    progress_callback(2, 4, f"✅ 实体标准化完成")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(2, 4, f"⚠️ 实体标准化失败: {str(e)}")
-        
-        step2["status"] = "completed"
-        step2["description"] = f"标准化了 {len(std_entities) if std_entities else len(entities)} 个实体"
-        
-        # 步骤3: 关系抽取
-        step3 = {
-            "step": 3,
-            "name": "关系抽取",
-            "status": "running",
-            "description": "正在抽取实体间的关系...",
-            "timestamp": time.time()
-        }
-        steps.append(step3)
-        if progress_callback:
-            progress_callback(3, 4, "步骤 3/4: 关系抽取...")
-        
-        # 执行关系抽取
-        relations = []
-        if hasattr(extractor, 'relations_extraction'):
-            try:
-                if progress_callback:
-                    progress_callback(3, 4, f"步骤 3/4: 正在抽取实体间的关系（基于 {len(named_entities)} 个实体）...")
-                relations = extractor.relations_extraction(passage, named_entities)
-                if progress_callback:
-                    progress_callback(3, 4, f"✅ 关系抽取完成，抽取了 {len(relations)} 条关系")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(3, 4, f"⚠️ 关系抽取失败: {str(e)}")
-        elif hasattr(extractor, '_relations_extraction_llm'):
-            try:
-                if progress_callback:
-                    progress_callback(3, 4, f"步骤 3/4: 正在抽取实体间的关系...")
-                relations = extractor._relations_extraction_llm(passage, named_entities)
-                if progress_callback:
-                    progress_callback(3, 4, f"✅ 关系抽取完成，抽取了 {len(relations)} 条关系")
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(3, 4, f"⚠️ 关系抽取失败: {str(e)}")
-        
-        step3["status"] = "completed"
-        step3["description"] = f"抽取了 {len(relations)} 条关系"
-        if relations:
-            step3["relations"] = [
-                {
-                    "from": rel.get("subject", rel.get("from", "")),
-                    "to": rel.get("object", rel.get("to", "")),
-                    "label": rel.get("predicate", rel.get("label", ""))
-                }
-                for rel in relations[:20]
-            ]
-        
-        # 步骤4: 图谱构建
-        step4 = {
-            "step": 4,
-            "name": "图谱构建",
-            "status": "running",
-            "description": "正在构建知识图谱...",
-            "timestamp": time.time()
-        }
-        steps.append(step4)
-        if progress_callback:
-            progress_callback(4, 4, "步骤 4/4: 图谱构建...")
-        
-        # 执行完整抽取以获取SubGraph
-        if progress_callback:
-            progress_callback(4, 4, "步骤 4/4: 正在构建知识图谱...")
+        # 直接调用invoke获取完整结果（不再构建步骤信息）
         results = extractor.invoke(chunk)
         subgraph = None
         if results and len(results) > 0:
@@ -790,23 +649,11 @@ def extract_knowledge_step_by_step(extractor, text: str, title: str = "输入文
             # 确保是 SubGraph 对象
             if not hasattr(subgraph, 'nodes'):
                 st.error(f"返回结果类型错误: {type(subgraph)}")
-                subgraph = None
-        
-        step4["status"] = "completed"
-        if subgraph:
-            step4["description"] = f"构建包含 {len(subgraph.nodes)} 个节点和 {len(subgraph.edges)} 条边的知识图谱"
-        else:
-            step4["description"] = "图谱构建完成"
-        
-        if progress_callback:
-            progress_callback(4, 4, "✅ 抽取完成！")
+                return None, steps
         
         return subgraph, steps
         
     except Exception as e:
-        if steps:
-            steps[-1]["status"] = "error"
-            steps[-1]["description"] = f"抽取失败: {str(e)}"
         import traceback
         st.error(traceback.format_exc())
         return None, steps
@@ -917,7 +764,7 @@ def generate_main_kb_visualization(subgraph: SubGraph, output_path: Path) -> Opt
         print(f"[ERROR] 生成可视化失败: {e}")
         import traceback
         traceback.print_exc()
-        return None
+    return None
 
 
 def load_main_knowledge_base(ckpt_dir: Path) -> Optional[SubGraph]:
@@ -971,7 +818,7 @@ def load_main_knowledge_base(ckpt_dir: Path) -> Optional[SubGraph]:
                             continue
                     if cache_count > 0:
                         loaded_count += cache_count
-                        cache.close()
+                    cache.close()
                 except Exception as e:
                     pass  # 读取checkpoint失败，继续尝试其他组件
         
@@ -1084,7 +931,7 @@ def main():
     
     # 自动初始化抽取器（如果尚未初始化）
     if st.session_state.extractor is None:
-        st.session_state.extractor = init_extractor()
+                st.session_state.extractor = init_extractor()
     
     # 标签页1: 知识抽取
     with tab1:
@@ -1245,14 +1092,14 @@ def main():
         
         # 刷新按钮
         if st.button("🔄 刷新主知识库", type="primary", use_container_width=True, key="refresh_main_kb"):
-            if ckpt_dir.exists():
-                subgraph = load_main_knowledge_base(ckpt_dir)
-                if subgraph:
-                    st.session_state.main_kb_subgraph = subgraph
-                    # 清除可视化缓存，强制重新生成
-                    cache_file = Path(__file__).parent / "visualizations" / "main_kb_visualization.html"
-                    if cache_file.exists():
-                        cache_file.unlink()
+                if ckpt_dir.exists():
+                    subgraph = load_main_knowledge_base(ckpt_dir)
+                    if subgraph:
+                        st.session_state.main_kb_subgraph = subgraph
+                # 清除可视化缓存，强制重新生成
+                cache_file = Path(__file__).parent / "visualizations" / "main_kb_visualization.html"
+                if cache_file.exists():
+                    cache_file.unlink()
         
         # 显示主知识库数据
         subgraph = st.session_state.main_kb_subgraph
@@ -1576,7 +1423,7 @@ def main():
                     try:
                         with open(html_path, "r", encoding="utf-8") as f:
                             html_content = f.read()
-                        
+                
                         # 在network初始化后添加监听器，稳定后自动禁用物理引擎
                         # 查找network初始化代码的位置
                         if "new vis.Network" in html_content:
@@ -1654,18 +1501,19 @@ def main():
                         
                         # 显示当前页的分段（使用卡片样式）
                         for idx, text_item in enumerate(current_page_texts, start=start_idx + 1):
-                            # 使用markdown创建卡片样式
+                            # 使用markdown创建卡片样式（背景与网页色调一致，文字为深色）
                             st.markdown(f"""
-                            <div style="background: rgba(255, 255, 255, 0.95); 
+                            <div style="background: rgba(102, 126, 234, 0.15); 
+                                        backdrop-filter: blur(10px);
                                         border-radius: 8px; 
                                         padding: 1rem; 
                                         margin: 0.5rem 0; 
                                         border-left: 4px solid #667eea;
                                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">
+                                <div style="font-size: 0.85rem; color: #f7fafc; margin-bottom: 0.5rem; font-weight: 600;">
                                     <strong>{text_item['entity_name']}</strong> ({text_item['entity_type']})
                                 </div>
-                                <div style="color: #333; line-height: 1.6;">
+                                <div style="color: #f7fafc; line-height: 1.6;">
                                     {text_item['text']}
                                 </div>
                             </div>

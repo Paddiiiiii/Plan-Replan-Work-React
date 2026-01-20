@@ -442,3 +442,52 @@ Formation(队形): EntityType
         usesForm(使用战术形式): CombatForm
         hasRelativePositions(相对位置): RelativePosition
         organizedIn(组织在): UnitOrganization
+
+# 防御战斗的主目录章节
+DefenseCombatChapter(防御战斗章节): EntityType
+    properties:
+        title(标题): Text
+            index: Text
+        sectionNumber(节编号): Text
+            index: Text
+    relations:
+        subSection(子章节): DefenseCombatSubsection
+            properties:
+                title(子章节标题): Text
+                    index: Text
+        parent(父章节): DefenseCombatChapter
+            properties:
+                title(父章节标题): Text
+                    index: Text
+
+# 防御战斗的子章节（如 防御战斗原则、防御战斗目标等）
+DefenseCombatSubsection(防御战斗子章节): EntityType
+    properties:
+        title(标题): Text
+            index: Text
+        sectionNumber(小节编号): Text
+            index: Text
+    relations:
+        parent(父章节): DefenseCombatChapter
+        relatedTasks(相关任务): CombatTask
+
+# 其他章节（例如：防御战斗原则、目标等）
+DefenseCombatPrinciples(防御战斗原则): EntityType
+    properties:
+        title(标题): Text
+            index: Text
+        description(描述): Text
+            index: TextAndVector
+    relations:
+        parent(父章节): DefenseCombatSubsection
+        relatedTasks(相关任务): CombatTask
+
+DefenseCombatObjectives(防御战斗目标): EntityType
+    properties:
+        title(标题): Text
+            index: Text
+        description(描述): Text
+            index: TextAndVector
+    relations:
+        parent(父章节): DefenseCombatSubsection
+        relatedTasks(相关任务): CombatTask

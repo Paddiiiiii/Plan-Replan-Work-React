@@ -327,7 +327,7 @@ def main():
     
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["智能体任务", "历史结果", "实体-关系图"])
+    tab1, tab2, tab3, tab4 = st.tabs(["智能体任务", "历史结果", "实体-关系图", "KAG推理"])
 
     with tab1:
         st.header("智能体任务流程")
@@ -1365,6 +1365,201 @@ def main():
                 with col2:
                     st.write("**属性**:")
                     st.json(node_data.get("properties", {}))
+    
+    with tab4:
+        st.header("🧠 KAG 知识推理")
+        st.markdown("输入您的问题，系统将基于知识图谱进行推理并返回答案及溯源信息。")
+        
+        # 初始化session state
+        if "kag_query_history" not in st.session_state:
+            st.session_state.kag_query_history = []
+        if "kag_last_result" not in st.session_state:
+            st.session_state.kag_last_result = None
+        
+        # 问题输入区域
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            question = st.text_area(
+                "请输入您的问题",
+                height=100,
+                placeholder="例如：轻步兵应该部署在什么位置？",
+                key="kag_question_input"
+            )
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)  # 垂直对齐
+            query_button = st.button("🔍 开始推理", type="primary", use_container_width=True)
+            clear_button = st.button("🗑️ 清空", use_container_width=True)
+        
+        if clear_button:
+            st.session_state.kag_query_history = []
+            st.session_state.kag_last_result = None
+            st.rerun()
+        
+        # 执行查询
+        if query_button and question.strip():
+            with st.spinner("正在推理中，请稍候..."):
+                try:
+                    response = requests.post(
+                        f"{API_URL}/api/kag/query",
+                        json={"question": question.strip()},
+                        timeout=API_TIMEOUT
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.session_state.kag_last_result = result
+                        st.session_state.kag_query_history.append({
+                            "question": question.strip(),
+                            "result": result,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                        st.rerun()
+                    else:
+                        error_msg = response.json().get("detail", f"请求失败: {response.status_code}")
+                        st.error(f"推理失败: {error_msg}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"连接API失败: {e}")
+                    st.info("请确保后端服务已启动（运行 main.py）")
+                except Exception as e:
+                    st.error(f"推理过程出错: {str(e)}")
+        
+        # 显示结果
+        if st.session_state.kag_last_result:
+            result = st.session_state.kag_last_result
+            
+            if result.get("success", False):
+                st.markdown("---")
+                st.subheader("📝 推理答案")
+                answer = result.get("answer", "")
+                if answer:
+                    st.markdown(f"**答案：**\n\n{answer}")
+                else:
+                    st.warning("未返回答案")
+                
+                # 显示检索到的原文（KAG检索的原始文档）
+                source_texts = result.get("source_texts", [])
+                if source_texts:
+                    st.markdown("---")
+                    st.subheader("📄 检索原文")
+                    st.markdown("以下是KAG检索到的原始文档片段，用于生成答案：")
+                    for idx, source in enumerate(source_texts, 1):
+                        source_text = source.get("text", str(source))
+                        source_metadata = source.get("metadata", {})
+                        source_type = source.get("source", "未知来源")
+                        
+                        with st.expander(f"原文 {idx} ({source_type}): {source_text[:80]}..." if len(source_text) > 80 else f"原文 {idx} ({source_type}): {source_text}", expanded=True):
+                            st.markdown(f"**原文内容：**")
+                            st.text_area(
+                                f"原文 {idx}",
+                                value=source_text,
+                                height=min(300, max(100, len(source_text) // 3)),
+                                key=f"source_text_{idx}",
+                                label_visibility="collapsed"
+                            )
+                            if source_metadata:
+                                st.markdown("**元数据：**")
+                                st.json(source_metadata)
+                else:
+                    st.info("未获取到检索原文（可能KAG未返回检索结果）")
+                
+                # 显示引用来源
+                references = result.get("references", [])
+                if references:
+                    st.markdown("---")
+                    st.subheader("📚 引用来源")
+                    for idx, ref in enumerate(references, 1):
+                        if isinstance(ref, dict):
+                            ref_text = ref.get("text", str(ref))
+                            ref_metadata = ref.get("metadata", {})
+                            with st.expander(f"引用 {idx}: {ref_text[:100]}..." if len(ref_text) > 100 else f"引用 {idx}: {ref_text}", expanded=False):
+                                st.markdown(f"**内容：**\n\n{ref_text}")
+                                if ref_metadata:
+                                    st.markdown("**元数据：**")
+                                    st.json(ref_metadata)
+                        else:
+                            st.markdown(f"**引用 {idx}：** {ref}")
+                
+                # 显示推理任务（溯源信息）
+                tasks = result.get("tasks", [])
+                if tasks:
+                    st.markdown("---")
+                    st.subheader("🔍 推理溯源")
+                    st.markdown("以下是推理过程中执行的任务，展示了答案的生成过程：")
+                    
+                    for idx, task in enumerate(tasks, 1):
+                        task_info = task.get("task", {})
+                        task_result = task.get("result", "")
+                        task_memory = task.get("memory", {})
+                        executor = task.get("executor", "未知")
+                        
+                        with st.expander(f"任务 {idx}: {executor}", expanded=False):
+                            # 显示任务参数
+                            if task_info:
+                                st.markdown("**任务参数：**")
+                                st.json(task_info)
+                            
+                            # 显示任务结果
+                            if task_result:
+                                st.markdown("**任务结果：**")
+                                if isinstance(task_result, str):
+                                    # 尝试解析JSON
+                                    try:
+                                        import json
+                                        parsed_result = json.loads(task_result)
+                                        st.json(parsed_result)
+                                    except:
+                                        st.text(task_result)
+                                else:
+                                    st.json(task_result)
+                            
+                            # 显示任务记忆（上下文信息）
+                            if task_memory:
+                                st.markdown("**任务上下文：**")
+                                for key, value in task_memory.items():
+                                    with st.expander(f"上下文: {key}", expanded=False):
+                                        if isinstance(value, dict):
+                                            st.json(value)
+                                        elif isinstance(value, str):
+                                            # 尝试解析JSON
+                                            try:
+                                                import json
+                                                parsed_value = json.loads(value)
+                                                st.json(parsed_value)
+                                            except:
+                                                st.text(value)
+                                        else:
+                                            st.text(str(value))
+                else:
+                    st.info("未获取到推理任务信息")
+                
+                # 显示输入查询
+                input_query = result.get("input_query", "")
+                if input_query:
+                    st.markdown("---")
+                    with st.expander("📥 原始查询", expanded=False):
+                        st.text(input_query)
+                
+                # 显示错误信息（如果有）
+                if result.get("error"):
+                    st.warning(f"⚠️ 警告: {result.get('error')}")
+            else:
+                error_msg = result.get("error", "未知错误")
+                st.error(f"推理失败: {error_msg}")
+        
+        # 显示查询历史
+        if st.session_state.kag_query_history:
+            st.markdown("---")
+            st.subheader("📜 查询历史")
+            for idx, history_item in enumerate(reversed(st.session_state.kag_query_history[-10:]), 1):  # 只显示最近10条
+                with st.expander(f"{history_item['timestamp']} - {history_item['question'][:50]}...", expanded=False):
+                    st.markdown(f"**问题：** {history_item['question']}")
+                    result = history_item['result']
+                    if result.get("success", False):
+                        answer = result.get("answer", "")
+                        if answer:
+                            st.markdown(f"**答案：** {answer[:200]}..." if len(answer) > 200 else f"**答案：** {answer}")
+                    else:
+                        st.error(f"推理失败: {result.get('error', '未知错误')}")
 
 
 if __name__ == "__main__":

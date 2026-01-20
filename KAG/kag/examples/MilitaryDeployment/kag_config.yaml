@@ -61,7 +61,7 @@ log:
 project:
   biz_scene: default
   host_addr: http://192.168.1.131:8887
-  id: '14'
+  id: '1'
   language: zh
   namespace: MilitaryDeploy
 
