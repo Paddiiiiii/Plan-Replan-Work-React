@@ -1,20 +1,23 @@
 from typing import Dict, List, Any, Optional, Tuple
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool, RelativePositionFilterTool, DistanceFilterTool, AreaFilterTool
 from context_manager import ContextManager
-from config import LLM_CONFIG, GEO_BOUNDS
+from config import LLM_CONFIG, GEO_BOUNDS, PATHS, TOOL_ENABLE_CONFIG
 from utils.llm_utils import call_llm, parse_plan_response
 from utils.tool_utils import get_tools_schema_text, prepare_step_input_path
 from utils.geojson_generator import generate_initial_geojson
 import json
 import logging
 import re
+from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 class WorkAgent:
     def __init__(self, context_manager: ContextManager):
         self.context_manager = context_manager
-        self.tools = {
+        # 根据配置只初始化启用的工具
+        all_tools = {
             "buffer_filter_tool": BufferFilterTool(),
             "elevation_filter_tool": ElevationFilterTool(),
             "slope_filter_tool": SlopeFilterTool(),
@@ -23,6 +26,12 @@ class WorkAgent:
             "distance_filter_tool": DistanceFilterTool(),
             "area_filter_tool": AreaFilterTool()
         }
+        # 只保留启用的工具
+        self.tools = {
+            tool_name: tool for tool_name, tool in all_tools.items()
+            if TOOL_ENABLE_CONFIG.get(tool_name, True)
+        }
+        logger.info(f"已启用的工具: {list(self.tools.keys())}")
 
     def execute_plan(self, plan: Dict) -> Dict[str, Any]:
         """
@@ -72,6 +81,9 @@ class WorkAgent:
         tool_plan["original_query"] = original_query
         tool_plan["kag_results"] = kag_results
         tool_plan["combined_kag_answers"] = combined_kag_answers
+        # 保留plan中的retrieved_entities和retrieved_relations，用于保存到kg_graph文件夹
+        tool_plan["retrieved_entities"] = plan.get("retrieved_entities", [])
+        tool_plan["retrieved_relations"] = plan.get("retrieved_relations", [])
         if plan.get("sub_questions"):
             tool_plan["sub_questions"] = plan.get("sub_questions")
         
@@ -152,6 +164,10 @@ class WorkAgent:
         }
         
         for step_type, tool_name in type_mapping.items():
+            # 检查工具是否启用
+            if not TOOL_ENABLE_CONFIG.get(tool_name, True):
+                continue  # 跳过未启用的工具
+            
             if tool_name in self.tools:
                 tool = self.tools[tool_name]
                 schema = tool.get_schema()
@@ -558,24 +574,33 @@ class WorkAgent:
         intermediate_geojson_paths = []  # 跟踪中间步骤保存的geojson文件
         initial_geojson_path = None  # 跟踪初始GeoJSON文件路径
 
-        # 如果第一个步骤需要input_geojson_path，先生成初始GeoJSON
-        # 需要初始GeoJSON的步骤类型：buffer, relative_position, elevation, slope, vegetation, distance, area
-        first_step_type = steps[0].get("type") if steps else None
-        needs_initial_geojson = first_step_type in ["buffer", "relative_position", "elevation", "slope", "vegetation", "distance", "area"]
+        # 如果第一个允许的步骤需要input_geojson_path，先生成初始GeoJSON
+        # 需要初始GeoJSON的步骤类型：relative_position, distance, area
+        allowed_tool_types = ["relative_position", "distance", "area"]
+        first_allowed_step = None
+        first_allowed_step_index = None
+        for i, step in enumerate(steps):
+            step_type = step.get("type", "")
+            if step_type in allowed_tool_types:
+                first_allowed_step = step
+                first_allowed_step_index = i
+                break
         
-        if steps and needs_initial_geojson:
+        needs_initial_geojson = first_allowed_step is not None and first_allowed_step.get("type") in ["relative_position", "distance", "area"]
+        
+        if needs_initial_geojson:
             try:
-                first_step_params = steps[0].get("params", {})
+                first_step_params = first_allowed_step.get("params", {})
                 utm_crs = first_step_params.get("utm_crs")
                 initial_geojson_path = generate_initial_geojson(utm_crs=utm_crs)
                 last_result_path = initial_geojson_path
                 # 注意：初始GeoJSON文件不立即添加到待清理列表，而是在所有步骤完成后才删除
                 # 确保第一步的params存在
-                if "params" not in steps[0]:
-                    steps[0]["params"] = {}
-                # 将初始GeoJSON路径填充到第一步的params中（如果还没有）
-                if "input_geojson_path" not in steps[0]["params"] or not steps[0]["params"]["input_geojson_path"]:
-                    steps[0]["params"]["input_geojson_path"] = initial_geojson_path
+                if "params" not in first_allowed_step:
+                    first_allowed_step["params"] = {}
+                # 将初始GeoJSON路径填充到第一个允许步骤的params中（如果还没有）
+                if "input_geojson_path" not in first_allowed_step["params"] or not first_allowed_step["params"]["input_geojson_path"]:
+                    first_allowed_step["params"]["input_geojson_path"] = initial_geojson_path
                 logger.info(f"生成初始GeoJSON文件: {initial_geojson_path}")
             except Exception as e:
                 logger.error(f"生成初始GeoJSON失败: {e}")
@@ -585,7 +610,49 @@ class WorkAgent:
                     "results": results
                 }
 
+        # 根据配置决定允许的工具类型
+        # 工具类型到工具名称的映射
+        type_to_tool_mapping = {
+            "buffer": "buffer_filter_tool",
+            "elevation": "elevation_filter_tool",
+            "slope": "slope_filter_tool",
+            "vegetation": "vegetation_filter_tool",
+            "relative_position": "relative_position_filter_tool",
+            "distance": "distance_filter_tool",
+            "area": "area_filter_tool"
+        }
+        
+        # 根据TOOL_ENABLE_CONFIG筛选允许的工具类型
+        allowed_tool_types = [
+            tool_type for tool_type, tool_name in type_to_tool_mapping.items()
+            if TOOL_ENABLE_CONFIG.get(tool_name, True)  # 默认启用
+        ]
+        
+        logger.info(f"启用的工具类型: {allowed_tool_types}")
+        
+        # 找到最后一个允许的工具类型的索引
+        last_allowed_step_index = None
+        for i in range(len(steps) - 1, -1, -1):
+            step_type = steps[i].get("type", "")
+            if step_type in allowed_tool_types:
+                last_allowed_step_index = i
+                break
+        
         for i, step in enumerate(steps):
+            step_type = step.get("type", "")
+            
+            # 如果工具类型不在允许列表中，跳过该步骤
+            if step_type and step_type not in allowed_tool_types:
+                logger.info(f"跳过工具类型 '{step_type}'（不在允许的工具列表中）")
+                # 记录跳过的步骤
+                results.append({
+                    "success": True,
+                    "tool": step_type,
+                    "skipped": True,
+                    "message": f"工具类型 '{step_type}' 已跳过（不在允许的工具列表中）"
+                })
+                continue
+            
             # 准备链式调用的输入路径
             prepare_step_input_path(step, last_result_path, self.tools)
 
@@ -595,8 +662,8 @@ class WorkAgent:
 
                 if step_result.get("success") and step_result.get("result", {}).get("result_path"):
                     result_path = step_result["result"]["result_path"]
-                    # 记录中间步骤的geojson文件（除了最后一步）
-                    if i < len(steps) - 1:  # 不是最后一步
+                    # 记录中间步骤的geojson文件（除了最后一个允许的工具类型）
+                    if i != last_allowed_step_index:  # 不是最后一个允许的工具类型
                         intermediate_geojson_paths.append(result_path)
                     last_result_path = result_path
 
@@ -646,6 +713,13 @@ class WorkAgent:
         if initial_geojson_path:
             self._cleanup_intermediate_files([initial_geojson_path])
 
+        # 如果执行成功且有最终结果路径，保存metadata文件
+        if last_result_path:
+            try:
+                self._save_result_metadata(last_result_path, plan, results, unit)
+            except Exception as e:
+                logger.warning(f"保存结果metadata失败: {e}", exc_info=True)
+        
         return {
             "success": True,
             "results": results,
@@ -763,6 +837,13 @@ class WorkAgent:
         if step_type and step_type in type_to_tool:
             tool_name = type_to_tool[step_type]
             
+            # 检查工具是否启用
+            if tool_name not in self.tools:
+                return {
+                    "success": False,
+                    "error": f"工具 '{tool_name}' 未启用（在config.py的TOOL_ENABLE_CONFIG中设置为False）"
+                }
+            
             # 再次验证参数（在工具调用前进行最后的参数格式检查）
             if not step_params:
                 return {
@@ -832,3 +913,431 @@ class WorkAgent:
                 "success": False,
                 "error": error_msg
             }
+    
+    def _save_result_metadata(self, result_path: str, plan: Dict, step_results: List[Dict], unit: str = None):
+        """
+        保存结果文件到不同的文件夹：
+        - geojson: 结果GeoJSON文件（已由工具保存）
+        - regions: 区域信息JSON文件
+        - llm_thinking: LLM思考结果JSON文件
+        - kg_graph: 实体关系图JSON文件
+        
+        Args:
+            result_path: GeoJSON结果文件路径
+            plan: 计划字典（包含kag_results等信息）
+            step_results: 步骤执行结果列表
+            unit: 单位名称（用于多任务模式）
+        """
+        try:
+            from config import PATHS
+            import json
+            
+            result_file = Path(result_path)
+            if not result_file.exists():
+                logger.warning(f"结果文件不存在，无法保存metadata: {result_path}")
+                return
+            
+            # 获取基础文件名（不含扩展名）
+            base_name = result_file.stem
+            
+            # 确保各个文件夹存在
+            regions_dir = PATHS["result_regions_dir"]
+            llm_thinking_dir = PATHS["result_llm_thinking_dir"]
+            kg_graph_dir = PATHS["result_kg_graph_dir"]
+            
+            regions_dir.mkdir(parents=True, exist_ok=True)
+            llm_thinking_dir.mkdir(parents=True, exist_ok=True)
+            kg_graph_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 提取区域信息（从plan或session_state中获取，这里先尝试从plan中解析）
+            regions = []
+            original_query = plan.get("original_query", "")
+            if original_query:
+                # 尝试从查询中解析区域信息
+                try:
+                    regions = self._parse_regions_from_task(original_query)
+                except:
+                    pass
+            
+            # 提取参考点信息（从step_results中提取）
+            reference_points = []
+            for step_result in step_results:
+                if step_result.get("success") and step_result.get("tool") == "relative_position_filter_tool":
+                    step_params = step_result.get("params", {})
+                    result_data = step_result.get("result", {})
+                    # 优先使用结果中的参考点信息
+                    ref_point = None
+                    ref_dir = None
+                    if result_data.get("reference_point"):
+                        ref_point = result_data.get("reference_point")
+                    elif step_params.get("reference_point"):
+                        ref_point = step_params.get("reference_point")
+                    if result_data.get("reference_direction") is not None:
+                        ref_dir = result_data.get("reference_direction")
+                    elif step_params.get("reference_direction") is not None:
+                        ref_dir = step_params.get("reference_direction")
+                    
+                    if ref_point and ref_dir is not None:
+                        reference_points.append({
+                            "point": ref_point,
+                            "direction": ref_dir
+                        })
+            
+            # 提取KAG问答结果
+            kag_results = plan.get("kag_results", [])
+            kag_qa_results = []
+            for kag_result in kag_results:
+                kag_qa_results.append({
+                    "question": kag_result.get("question", ""),
+                    "answer": kag_result.get("answer", ""),
+                    "input_query": kag_result.get("input_query", "")
+                })
+            
+            # 优先使用plan中已有的retrieved_entities和retrieved_relations
+            retrieved_entities = plan.get("retrieved_entities", [])
+            retrieved_relations = plan.get("retrieved_relations", [])
+            
+            logger.info(f"从plan中获取的实体数量: {len(retrieved_entities)}, 关系数量: {len(retrieved_relations)}")
+            
+            # 如果plan中没有，则从kag_results的tasks中提取检索到的实体和关系（向后兼容）
+            if not retrieved_entities and not retrieved_relations:
+                logger.info("plan中没有retrieved_entities和retrieved_relations，尝试从kag_results中提取")
+                entity_id_set = set()  # 用于去重
+                relation_key_set = set()  # 用于去重
+                
+                # 从kag_results的tasks中提取检索到的实体和关系
+                for kag_result in kag_results:
+                    tasks = kag_result.get("tasks", [])
+                    for task in tasks:
+                        # 从task的memory中提取
+                        task_memory = task.get("memory", {})
+                        if isinstance(task_memory, dict):
+                            # 从retriever结果中提取实体和关系
+                            if "retriever" in task_memory:
+                                retriever_output = task_memory["retriever"]
+                                self._extract_entities_relations_from_retriever_output(
+                                    retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                                )
+                            
+                            # 从graph_data中提取
+                            if "graph_data" in task_memory:
+                                graph_data = task_memory["graph_data"]
+                                self._extract_entities_relations_from_graph_data(
+                                    graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                                )
+                        
+                        # 从task的result中提取
+                        task_result = task.get("result")
+                        if task_result:
+                            self._extract_entities_relations_from_retriever_output(
+                                task_result, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                            )
+            
+            # 提取筛选参数信息（从step_results中提取）
+            filter_params_list = []
+            for step_idx, step_result in enumerate(step_results):
+                if step_result.get("success"):
+                    tool_name = step_result.get("tool", "")
+                    step_params = step_result.get("params", {})
+                    is_default = step_result.get("is_default", False)
+                    
+                    # 跳过使用默认值的工具
+                    if is_default:
+                        continue
+                    
+                    # 为每个工具调用创建一个独立的参数字典
+                    step_filter_params = {}
+                    
+                    if tool_name == "buffer_filter_tool":
+                        buffer_dist = step_params.get("buffer_distance")
+                        if buffer_dist is not None:
+                            step_filter_params["缓冲区距离"] = f"{buffer_dist} 米"
+                    elif tool_name == "elevation_filter_tool":
+                        min_elev = step_params.get("min_elev")
+                        max_elev = step_params.get("max_elev")
+                        if min_elev is not None or max_elev is not None:
+                            elev_str = ""
+                            if min_elev is not None:
+                                elev_str += f"{min_elev} 米"
+                            if max_elev is not None:
+                                if elev_str:
+                                    elev_str += " - "
+                                elev_str += f"{max_elev} 米"
+                            step_filter_params["高程范围"] = elev_str
+                    elif tool_name == "slope_filter_tool":
+                        min_slope = step_params.get("min_slope")
+                        max_slope = step_params.get("max_slope")
+                        if min_slope is not None or max_slope is not None:
+                            slope_str = ""
+                            if min_slope is not None:
+                                slope_str += f"{min_slope}°"
+                            if max_slope is not None:
+                                if slope_str:
+                                    slope_str += " - "
+                                slope_str += f"{max_slope}°"
+                            step_filter_params["坡度范围"] = slope_str
+                    elif tool_name == "vegetation_filter_tool":
+                        veg_types = step_params.get("vegetation_types", [])
+                        exclude_types = step_params.get("exclude_types", [])
+                        if veg_types:
+                            veg_names = {
+                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                            }
+                            veg_list = [veg_names.get(v, str(v)) for v in veg_types]
+                            step_filter_params["植被类型"] = ", ".join(veg_list)
+                        elif exclude_types:
+                            veg_names = {
+                                10: "树", 20: "灌木", 30: "草地", 40: "耕地",
+                                50: "建筑", 60: "裸地/稀疏植被", 70: "雪和冰",
+                                80: "水体", 90: "湿地", 95: "苔原", 100: "永久性水体"
+                            }
+                            exclude_list = [veg_names.get(v, str(v)) for v in exclude_types]
+                            step_filter_params["排除植被类型"] = ", ".join(exclude_list)
+                    elif tool_name == "relative_position_filter_tool":
+                        reference_point = step_params.get("reference_point", {})
+                        reference_direction = step_params.get("reference_direction")
+                        position_types = step_params.get("position_types", [])
+                        if reference_point:
+                            lon = reference_point.get("lon")
+                            lat = reference_point.get("lat")
+                            if lon is not None and lat is not None:
+                                step_filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                        if reference_direction is not None:
+                            step_filter_params["参考方向"] = f"{reference_direction}°"
+                        if position_types:
+                            step_filter_params["相对位置类型"] = ", ".join(position_types)
+                    elif tool_name == "distance_filter_tool":
+                        reference_point = step_params.get("reference_point", {})
+                        max_distance = step_params.get("max_distance")
+                        if reference_point:
+                            lon = reference_point.get("lon")
+                            lat = reference_point.get("lat")
+                            if lon is not None and lat is not None:
+                                step_filter_params["参考点坐标"] = f"({lon:.6f}, {lat:.6f})"
+                        if max_distance is not None:
+                            step_filter_params["最大距离"] = f"{max_distance} 米"
+                    elif tool_name == "area_filter_tool":
+                        min_area_km2 = step_params.get("min_area_km2")
+                        if min_area_km2 is not None:
+                            step_filter_params["最小面积"] = f"{min_area_km2} 平方公里"
+                    
+                    # 如果有参数，添加到列表
+                    if step_filter_params:
+                        filter_params_list.append({
+                            "step": step_idx + 1,
+                            "tool": tool_name,
+                            "params": step_filter_params
+                        })
+            
+            # 1. 保存区域信息到regions文件夹
+            regions_data = {
+                "result_file": result_file.name,
+                "timestamp": datetime.now().isoformat(),
+                "unit": unit,
+                "original_query": original_query,
+                "regions": regions,
+                "reference_points": reference_points,
+                "filter_params": filter_params_list
+            }
+            regions_path = regions_dir / f"{base_name}.json"
+            with open(regions_path, "w", encoding="utf-8") as f:
+                json.dump(regions_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"已保存区域信息: {regions_path}")
+            
+            # 2. 保存LLM思考结果到llm_thinking文件夹
+            llm_thinking_data = {
+                "result_file": result_file.name,
+                "timestamp": datetime.now().isoformat(),
+                "unit": unit,
+                "original_query": original_query,
+                "first_llm_response": plan.get("first_llm_response", ""),
+                "second_llm_response": plan.get("second_llm_response", ""),
+                "kag_qa_results": kag_qa_results
+            }
+            llm_thinking_path = llm_thinking_dir / f"{base_name}.json"
+            with open(llm_thinking_path, "w", encoding="utf-8") as f:
+                json.dump(llm_thinking_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"已保存LLM思考结果: {llm_thinking_path}")
+            
+            # 3. 保存实体关系图到kg_graph文件夹
+            kg_graph_data = {
+                "result_file": result_file.name,
+                "timestamp": datetime.now().isoformat(),
+                "unit": unit,
+                "original_query": original_query,
+                "retrieved_entities": retrieved_entities,
+                "retrieved_relations": retrieved_relations
+            }
+            kg_graph_path = kg_graph_dir / f"{base_name}.json"
+            with open(kg_graph_path, "w", encoding="utf-8") as f:
+                json.dump(kg_graph_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"已保存实体关系图: {kg_graph_path}")
+        except Exception as e:
+            logger.error(f"保存结果metadata失败: {e}", exc_info=True)
+    
+    def _extract_entities_relations_from_retriever_output(self, retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
+        """从retriever输出中提取实体和关系"""
+        if isinstance(retriever_output, dict):
+            # 检查是否有graph_data或kg_graph
+            graph_data = retriever_output.get("graph_data") or retriever_output.get("kg_graph")
+            if graph_data:
+                self._extract_entities_relations_from_graph_data(
+                    graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                )
+            
+            # 检查是否有chunks，从chunks中提取实体和关系
+            chunks = retriever_output.get("chunks", [])
+            for chunk in chunks:
+                if isinstance(chunk, dict):
+                    # 尝试从chunk的metadata中提取实体和关系
+                    chunk_metadata = chunk.get("metadata", {})
+                    if chunk_metadata:
+                        # 检查是否有实体和关系信息
+                        entities = chunk_metadata.get("entities", [])
+                        relations = chunk_metadata.get("relations", [])
+                        if entities:
+                            for entity in entities:
+                                if isinstance(entity, dict):
+                                    entity_id = entity.get("id") or entity.get("name", "")
+                                    if entity_id and entity_id not in entity_id_set:
+                                        entity_id_set.add(entity_id)
+                                        retrieved_entities.append({
+                                            "id": entity_id,
+                                            "name": entity.get("name", entity_id),
+                                            "type": entity.get("type") or entity.get("label", "Unknown"),
+                                            "properties": entity.get("properties", {})
+                                        })
+                        if relations:
+                            for relation in relations:
+                                if isinstance(relation, dict):
+                                    source = relation.get("source") or relation.get("from_id") or relation.get("from", "")
+                                    target = relation.get("target") or relation.get("to_id") or relation.get("to", "")
+                                    relation_type = relation.get("type") or relation.get("label", "Unknown")
+                                    if source and target:
+                                        relation_key = f"{source}->{target}->{relation_type}"
+                                        if relation_key not in relation_key_set:
+                                            relation_key_set.add(relation_key)
+                                            retrieved_relations.append({
+                                                "source": source,
+                                                "target": target,
+                                                "type": relation_type,
+                                                "properties": relation.get("properties", {})
+                                            })
+    
+    def _extract_entities_relations_from_graph_data(self, graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
+        """从graph_data中提取实体和关系"""
+        if isinstance(graph_data, dict):
+            # 提取节点（实体）
+            nodes = graph_data.get("nodes", graph_data.get("resultNodes", []))
+            if not nodes and "result_nodes" in graph_data:
+                nodes = graph_data.get("result_nodes", [])
+            
+            for node in nodes:
+                if isinstance(node, dict):
+                    entity_id = node.get("id") or node.get("name", "")
+                    if entity_id and entity_id not in entity_id_set:
+                        entity_id_set.add(entity_id)
+                        retrieved_entities.append({
+                            "id": entity_id,
+                            "name": node.get("name", entity_id),
+                            "type": node.get("type") or node.get("label", "Unknown"),
+                            "properties": node.get("properties", {})
+                        })
+            
+            # 提取边（关系）
+            edges = graph_data.get("edges", graph_data.get("resultEdges", []))
+            if not edges and "result_edges" in graph_data:
+                edges = graph_data.get("result_edges", [])
+            
+            for edge in edges:
+                if isinstance(edge, dict):
+                    source = edge.get("from_id") or edge.get("from") or edge.get("source", "")
+                    target = edge.get("to_id") or edge.get("to") or edge.get("target", "")
+                    relation_type = edge.get("label") or edge.get("type", "Unknown")
+                    if source and target:
+                        relation_key = f"{source}->{target}->{relation_type}"
+                        if relation_key not in relation_key_set:
+                            relation_key_set.add(relation_key)
+                            retrieved_relations.append({
+                                "source": source,
+                                "target": target,
+                                "type": relation_type,
+                                "properties": edge.get("properties", {})
+                            })
+        elif hasattr(graph_data, "result_nodes") and hasattr(graph_data, "result_edges"):
+            # 如果是KgGraph对象，尝试转换为字典
+            try:
+                if hasattr(graph_data, "to_dict"):
+                    graph_dict = graph_data.to_dict()
+                    self._extract_entities_relations_from_graph_data(
+                        graph_dict, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                    )
+                else:
+                    # 直接从对象属性提取
+                    nodes = getattr(graph_data, "result_nodes", [])
+                    edges = getattr(graph_data, "result_edges", [])
+                    for node in nodes:
+                        if hasattr(node, "id"):
+                            entity_id = getattr(node, "id", "")
+                            if entity_id and entity_id not in entity_id_set:
+                                entity_id_set.add(entity_id)
+                                retrieved_entities.append({
+                                    "id": entity_id,
+                                    "name": getattr(node, "name", entity_id),
+                                    "type": getattr(node, "label", "Unknown"),
+                                    "properties": getattr(node, "properties", {}) if hasattr(node, "properties") else {}
+                                })
+                    for edge in edges:
+                        if hasattr(edge, "from_id") or hasattr(edge, "_from"):
+                            source = getattr(edge, "from_id", "") or getattr(edge, "_from", "")
+                            target = getattr(edge, "to_id", "") or getattr(edge, "to", "")
+                            relation_type = getattr(edge, "label", "Unknown")
+                            if source and target:
+                                relation_key = f"{source}->{target}->{relation_type}"
+                                if relation_key not in relation_key_set:
+                                    relation_key_set.add(relation_key)
+                                    retrieved_relations.append({
+                                        "source": source,
+                                        "target": target,
+                                        "type": relation_type,
+                                        "properties": getattr(edge, "properties", {}) if hasattr(edge, "properties") else {}
+                                    })
+            except Exception as e:
+                logger.debug(f"从graph_data对象提取实体和关系失败: {e}")
+    
+    def _parse_regions_from_task(self, task_text: str) -> List[Dict]:
+        """
+        从任务文本中解析区域信息（前沿区域、调整线S、调整线P、后方保障区）
+        
+        格式示例：
+        前沿区域：左上角: (118.5, 31.5)右下角: (118.552, 31.545)
+        调整线S：左上角: (118.5, 31.518)右下角: (118.552, 31.563)
+        调整线P：左上角: (118.5, 31.536)右下角: (118.552, 31.581)
+        后方保障区：左上角: (118.552, 31.581)右下角: (118.604, 31.626)
+        
+        Returns:
+            List[Dict]: 区域信息列表，每个元素包含 name, top_left, bottom_right
+        """
+        regions = []
+        
+        # 匹配区域名称和坐标的模式
+        # 匹配格式：区域名：左上角: (lon, lat)右下角: (lon, lat)
+        pattern = r'([^：:]+)[：:]\s*左上角[：:]\s*\(([\d.]+),\s*([\d.]+)\)\s*右下角[：:]\s*\(([\d.]+),\s*([\d.]+)\)'
+        
+        matches = re.finditer(pattern, task_text)
+        for match in matches:
+            region_name = match.group(1).strip()
+            top_left_lon = float(match.group(2))
+            top_left_lat = float(match.group(3))
+            bottom_right_lon = float(match.group(4))
+            bottom_right_lat = float(match.group(5))
+            
+            regions.append({
+                "name": region_name,
+                "top_left": (top_left_lon, top_left_lat),
+                "bottom_right": (bottom_right_lon, bottom_right_lat)
+            })
+        
+        return regions

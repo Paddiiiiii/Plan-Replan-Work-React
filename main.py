@@ -113,11 +113,11 @@ if __name__ == "__main__":
             print("=" * 60)
             print("按 Ctrl+C 停止服务")
             print("=" * 60)
-            
+
             try:
                 while True:
                     time.sleep(1)
-                    if frontend_process.poll() is not None:
+                    if frontend_process and frontend_process.poll() is not None:
                         print("前端进程已退出，正在重启...")
                         frontend_process = run_frontend()
                         time.sleep(2)

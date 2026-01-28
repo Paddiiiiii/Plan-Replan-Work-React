@@ -8,8 +8,9 @@ import os
 from datetime import datetime
 from work.tools.base_tool import BaseTool
 
-BASE_DIR = Path(__file__).parent.parent.parent
-RESULT_DIR = BASE_DIR / "result"
+from config import PATHS
+
+RESULT_DIR = PATHS["result_geojson_dir"]
 
 
 class DistanceFilterTool(BaseTool):
@@ -107,7 +108,7 @@ class DistanceFilterTool(BaseTool):
         
         # 如果存在大面积区域（>1平方公里），进行细分
         if gdf['area_km2'].max() > 1.0:
-            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=0.0081)
         
         valid_indices = []
         distances_dict = {}  # 使用字典存储，键为索引

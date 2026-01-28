@@ -11,9 +11,11 @@ import os
 from datetime import datetime
 from work.tools.base_tool import BaseTool
 
+from config import PATHS
+
 BASE_DIR = Path(__file__).parent.parent.parent
 TPI_PATH = BASE_DIR / "data" / "tpi_60_06.img"
-RESULT_DIR = BASE_DIR / "result"
+RESULT_DIR = PATHS["result_geojson_dir"]
 
 
 class SlopeFilterTool(BaseTool):
@@ -182,7 +184,7 @@ class SlopeFilterTool(BaseTool):
         
         # 如果存在大面积区域（>1平方公里），进行细分
         if gdf['area_km2'].max() > 1.0:
-            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=0.0081)
         
         valid_indices = []
         slopes = []

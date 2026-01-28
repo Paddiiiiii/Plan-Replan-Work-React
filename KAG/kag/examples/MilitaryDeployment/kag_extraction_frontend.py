@@ -385,40 +385,68 @@ st.markdown("""
         color: #f7fafc !important;
     }
     
-    /* Multiselect下拉框选项样式 */
+    /* Multiselect下拉框选项样式 - 强制白色背景和深色文字 */
     [data-baseweb="popover"] {
-        background: rgba(255, 255, 255, 0.98) !important;
+        background: #ffffff !important;
         backdrop-filter: blur(10px) !important;
         border-radius: 8px !important;
     }
     
     [data-baseweb="menu"] {
-        background: rgba(255, 255, 255, 0.98) !important;
+        background: #ffffff !important;
     }
     
     [data-baseweb="menu"] ul {
-        background: rgba(255, 255, 255, 0.98) !important;
+        background: #ffffff !important;
     }
     
     [data-baseweb="menu"] li {
-        background: rgba(255, 255, 255, 0.98) !important;
-        color: #2d3748 !important;
+        background: #ffffff !important;
+        color: #1a1a1a !important;
+    }
+    
+    /* 强制所有下拉选项文字为黑色 */
+    [data-baseweb="menu"] li *,
+    [data-baseweb="menu"] li span,
+    [data-baseweb="menu"] li div,
+    [data-baseweb="menu"] li label,
+    [data-baseweb="menu"] li p {
+        color: #1a1a1a !important;
+        background: transparent !important;
     }
     
     [data-baseweb="menu"] li:hover {
         background: rgba(102, 126, 234, 0.2) !important;
-        color: #2d3748 !important;
+    }
+    
+    [data-baseweb="menu"] li:hover *,
+    [data-baseweb="menu"] li:hover span,
+    [data-baseweb="menu"] li:hover div,
+    [data-baseweb="menu"] li:hover label {
+        color: #1a1a1a !important;
     }
     
     [data-baseweb="menu"] li[aria-selected="true"] {
         background: rgba(102, 126, 234, 0.3) !important;
-        color: #2d3748 !important;
     }
     
-    /* Multiselect选项文本颜色 */
-    [data-baseweb="menu"] li span,
-    [data-baseweb="menu"] li div {
-        color: #2d3748 !important;
+    [data-baseweb="menu"] li[aria-selected="true"] *,
+    [data-baseweb="menu"] li[aria-selected="true"] span,
+    [data-baseweb="menu"] li[aria-selected="true"] div,
+    [data-baseweb="menu"] li[aria-selected="true"] label {
+        color: #1a1a1a !important;
+    }
+    
+    /* 确保所有文本元素都是深色 */
+    [data-baseweb="popover"] * {
+        color: #1a1a1a !important;
+    }
+    
+    [data-baseweb="popover"] span,
+    [data-baseweb="popover"] div,
+    [data-baseweb="popover"] p,
+    [data-baseweb="popover"] label {
+        color: #1a1a1a !important;
     }
     
     /* Multiselect标签样式 */
@@ -1000,45 +1028,233 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # 生成可视化（可视化文件保存到visualizations目录，不影响主知识库）
-            output_dir = Path(__file__).parent / "visualizations"
-            output_dir.mkdir(exist_ok=True)
-            
-            output_file = output_dir / f"extraction_{int(time.time())}.html"
-            
-            try:
-                with st.spinner("🎨 正在生成可视化..."):
-                    visualize_enhanced_graph(
-                        subgraph=subgraph,
-                        source_text=source_text,
-                        extraction_steps=steps,
-                        output_path=str(output_file.with_suffix(''))
+            # 使用pyvis创建交互式可视化（与主知识库展示一致）
+            if subgraph.nodes or subgraph.edges:
+                try:
+                    from pyvis.network import Network
+                    import tempfile
+                    import os
+                    
+                    # 创建网络图 - 使用深色背景以突出彩色节点
+                    net = Network(
+                        height="600px",
+                        width="100%",
+                        bgcolor="#1a1a2e",  # 深蓝黑色背景
+                        font_color="white",
+                        directed=True
                     )
-                
-                # 显示HTML文件（直接嵌入页面，不使用iframe滚动）
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
-                
-                # 直接显示HTML内容，不使用iframe的滚动条
-                st.components.v1.html(html_content, height=800, scrolling=False)
-                
-                # 下载按钮（使用更酷炫的样式）
-                col_dl1, col_dl2, col_dl3 = st.columns([1, 2, 1])
-                with col_dl2:
-                    with open(output_file, 'rb') as f:
-                        st.download_button(
-                            label="📥 下载可视化结果 (HTML)",
-                            data=f.read(),
-                            file_name=output_file.name,
-                            mime="text/html",
-                            use_container_width=True,
-                            type="primary"
+                    
+                    # 关系类型配色方案
+                    relation_type_colors = {
+                        "位于": "#FF6B9D", "包含": "#4ECDC4", "相邻": "#95E1D3", "连接": "#FECA57",
+                        "控制": "#48DBFB", "支持": "#FF9FF3", "攻击": "#54A0FF", "防御": "#5F27CD",
+                        "部署": "#00D2D3", "指挥": "#FF6348", "隶属": "#FFA502", "协同": "#A55EEA",
+                        "依赖": "#26DE81", "影响": "#FD79A8", "关联": "#FDCB6E", "组成": "#6C5CE7",
+                        "属于": "#00B894", "执行": "#E17055", "负责": "#74B9FF", "监控": "#A29BFE",
+                    }
+                    
+                    # 收集所有关系类型并分配颜色
+                    all_relation_types = sorted(set([str(e.label) for e in subgraph.edges if e.label]))
+                    relation_color_map = {}
+                    default_colors = [
+                        "#FF6B9D", "#4ECDC4", "#95E1D3", "#FECA57", "#48DBFB",
+                        "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF6348",
+                        "#FFA502", "#A55EEA", "#26DE81", "#FD79A8", "#FDCB6E",
+                        "#6C5CE7", "#00B894", "#E17055", "#74B9FF", "#A29BFE",
+                    ]
+                    
+                    for idx, rel_type in enumerate(all_relation_types):
+                        if rel_type in relation_type_colors:
+                            relation_color_map[rel_type] = relation_type_colors[rel_type]
+                        else:
+                            relation_color_map[rel_type] = default_colors[idx % len(default_colors)]
+                    
+                    # 统计每个节点参与的关系类型（用于确定节点颜色）
+                    node_relation_counts = {}
+                    for edge in subgraph.edges:
+                        source = str(edge.from_id)
+                        target = str(edge.to_id)
+                        relation_type = str(edge.label) if edge.label else "Unknown"
+                        
+                        if source not in node_relation_counts:
+                            node_relation_counts[source] = {}
+                        if target not in node_relation_counts:
+                            node_relation_counts[target] = {}
+                        
+                        node_relation_counts[source][relation_type] = node_relation_counts[source].get(relation_type, 0) + 1
+                        node_relation_counts[target][relation_type] = node_relation_counts[target].get(relation_type, 0) + 1
+                    
+                    # 添加节点
+                    entity_map = {}
+                    for node in subgraph.nodes:
+                        entity_id = str(node.id)
+                        entity_name = str(node.name) if node.name else entity_id
+                        entity_type = str(node.label) if node.label else "Unknown"
+                        
+                        # 根据节点参与的主要关系类型确定颜色
+                        if entity_id in node_relation_counts and node_relation_counts[entity_id]:
+                            main_relation = max(node_relation_counts[entity_id].items(), key=lambda x: x[1])[0]
+                            node_color = relation_color_map.get(main_relation, "#888888")
+                        else:
+                            node_color = "#888888"
+                        
+                        # 构建节点标题
+                        title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
+                        if node.properties:
+                            title += "<br>属性:"
+                            for key, value in list(node.properties.items())[:5]:
+                                title += f"<br>  {key}: {value}"
+                        
+                        net.add_node(
+                            entity_id,
+                            label=entity_name[:20],
+                            title=title,
+                            color={
+                                "background": node_color,
+                                "border": node_color,
+                                "highlight": {"background": node_color, "border": "#FFFFFF"},
+                                "hover": {"background": node_color, "border": "#FFFFFF"}
+                            },
+                            font={"color": "#FFFFFF", "size": 14, "face": "Arial"},
+                            size=25,
+                            borderWidth=3,
+                            borderWidthSelected=5
                         )
-                
-            except Exception as e:
-                st.error(f"生成可视化失败: {e}")
-                import traceback
-                st.error(traceback.format_exc())
+                        entity_map[entity_id] = node
+                    
+                    # 添加边
+                    for edge in subgraph.edges:
+                        source = str(edge.from_id)
+                        target = str(edge.to_id)
+                        relation_type = str(edge.label) if edge.label else "Unknown"
+                        edge_color = relation_color_map.get(relation_type, "#888888")
+                        
+                        if source in entity_map and target in entity_map:
+                            net.add_edge(
+                                source,
+                                target,
+                                label=relation_type[:15],
+                                title=relation_type,
+                                color={"color": edge_color, "highlight": "#FFFFFF", "hover": "#FFFFFF"},
+                                width=3,
+                                arrows={"to": {"enabled": True, "scaleFactor": 1.2, "type": "arrow"}},
+                                font={"color": edge_color, "size": 12, "align": "middle"},
+                                smooth={"type": "curvedCW", "roundness": 0.2}
+                            )
+                    
+                    # 配置物理引擎
+                    net.set_options("""
+                    {
+                      "physics": {
+                        "enabled": true,
+                        "barnesHut": {
+                          "gravitationalConstant": -2000,
+                          "centralGravity": 0.1,
+                          "springLength": 200,
+                          "springConstant": 0.04,
+                          "damping": 0.09
+                        },
+                        "stabilization": {
+                          "enabled": true,
+                          "iterations": 200,
+                          "updateInterval": 25,
+                          "onlyDynamicEdges": false,
+                          "fit": true
+                        },
+                        "adaptiveTimestep": true,
+                        "maxVelocity": 50
+                      },
+                      "interaction": {
+                        "hover": true,
+                        "tooltipDelay": 200,
+                        "zoomView": true,
+                        "dragView": true,
+                        "dragNodes": true
+                      }
+                    }
+                    """)
+                    
+                    # 生成HTML到临时文件
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
+                        net.save_graph(html_file.name)
+                        html_path = html_file.name
+                    
+                    # 读取HTML内容并修改，添加稳定后自动禁用物理引擎的代码
+                    try:
+                        with open(html_path, "r", encoding="utf-8") as f:
+                            html_content = f.read()
+                        
+                        if "new vis.Network" in html_content:
+                            replacement = """var network = new vis.Network(container, data, options);
+                    network.once("stabilizationIterationsDone", function() {
+                      network.setOptions({physics: {enabled: false}});
+                    });"""
+                            html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
+                        
+                        # 在Streamlit中显示
+                        st.components.v1.html(html_content, height=650, scrolling=False)
+                    finally:
+                        try:
+                            os.unlink(html_path)
+                        except:
+                            pass
+                    
+                    # 原文高亮功能
+                    if source_text:
+                        st.markdown("---")
+                        st.subheader("📝 原文高亮")
+                        
+                        # 提取所有实体名称用于高亮
+                        entity_names = {}
+                        for node in subgraph.nodes:
+                            entity_name = str(node.name) if node.name else ""
+                            entity_id = str(node.id)
+                            if entity_name:
+                                entity_names[entity_name] = entity_id
+                        
+                        # 对原文进行高亮处理
+                        highlighted_text = source_text
+                        # 按长度从长到短排序，避免短名称覆盖长名称
+                        sorted_names = sorted(entity_names.keys(), key=len, reverse=True)
+                        for entity_name in sorted_names:
+                            if entity_name in highlighted_text:
+                                # 使用mark标签高亮实体（使用更亮的颜色，在紫色背景上更清晰）
+                                highlighted_text = highlighted_text.replace(
+                                    entity_name,
+                                    f'<mark style="background-color: #ffd700; color: #1a1a1a; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: 600;" onclick="focusNode(\'{entity_names[entity_name]}\')">{entity_name}</mark>'
+                                )
+                        
+                        # 显示高亮后的文本（背景与网页整体颜色一致）
+                        st.markdown(f"""
+                        <div style="background: rgba(102, 126, 234, 0.15); 
+                                    backdrop-filter: blur(10px);
+                                    border-radius: 8px; 
+                                    padding: 1.5rem; 
+                                    margin: 1rem 0; 
+                                    border-left: 4px solid #667eea;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                    color: #f7fafc;
+                                    line-height: 1.8;
+                                    font-size: 1rem;">
+                            {highlighted_text}
+                        </div>
+                        <script>
+                        function focusNode(nodeId) {{
+                            // 触发节点聚焦事件（需要与pyvis网络图交互）
+                            console.log('Focus node:', nodeId);
+                        }}
+                        </script>
+                        """, unsafe_allow_html=True)
+                    
+                except ImportError:
+                    st.error("pyvis库未安装，请运行: pip install pyvis")
+                    st.code("pip install pyvis", language="bash")
+                except Exception as e:
+                    st.error(f"生成可视化失败: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
+            else:
+                st.info("没有数据可显示")
             
             # 显示原始数据
             with st.expander("📄 查看原始数据（JSON格式）"):
@@ -1093,9 +1309,9 @@ def main():
         # 刷新按钮
         if st.button("🔄 刷新主知识库", type="primary", use_container_width=True, key="refresh_main_kb"):
                 if ckpt_dir.exists():
-                    subgraph = load_main_knowledge_base(ckpt_dir)
-                    if subgraph:
-                        st.session_state.main_kb_subgraph = subgraph
+                        subgraph = load_main_knowledge_base(ckpt_dir)
+                        if subgraph:
+                            st.session_state.main_kb_subgraph = subgraph
                 # 清除可视化缓存，强制重新生成
                 cache_file = Path(__file__).parent / "visualizations" / "main_kb_visualization.html"
                 if cache_file.exists():
@@ -1423,7 +1639,7 @@ def main():
                     try:
                         with open(html_path, "r", encoding="utf-8") as f:
                             html_content = f.read()
-                
+                        
                         # 在network初始化后添加监听器，稳定后自动禁用物理引擎
                         # 查找network初始化代码的位置
                         if "new vis.Network" in html_content:

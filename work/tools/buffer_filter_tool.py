@@ -10,9 +10,11 @@ import os
 from datetime import datetime
 from work.tools.base_tool import BaseTool
 
+from config import PATHS
+
 BASE_DIR = Path(__file__).parent.parent.parent
 OSM_PATH = BASE_DIR / "data" / "118.5_31.5.osm"
-RESULT_DIR = BASE_DIR / "result"
+RESULT_DIR = PATHS["result_geojson_dir"]
 
 
 class BufferFilterTool(BaseTool):

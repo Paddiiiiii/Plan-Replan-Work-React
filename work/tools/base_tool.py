@@ -55,13 +55,14 @@ class BaseTool(ABC):
         
         return clipped_gdf
     
-    def subdivide_large_regions(self, gdf: gpd.GeoDataFrame, max_area_km2: float = 1.0) -> gpd.GeoDataFrame:
+    def subdivide_large_regions(self, gdf: gpd.GeoDataFrame, max_area_km2: float = 0.0081) -> gpd.GeoDataFrame:
         """
         将大面积区域细分成更小的网格，以便后续筛选工具能更精确地工作
         
         Args:
             gdf: 输入的GeoDataFrame
             max_area_km2: 最大允许的区域面积（平方公里），超过此面积将被细分
+                         默认值为0.0081（对应90m x 90m的网格）
             
         Returns:
             细分后的GeoDataFrame
@@ -90,6 +91,9 @@ class BaseTool(ABC):
         subdivided_geometries = []
         subdivided_data = []
         
+        # 固定网格大小为90米（对应30m和90m数据精度）
+        grid_size = 90.0  # 米
+        
         for idx, row in gdf_utm.iterrows():
             geom = row.geometry
             area_km2 = geom.area / 1000000  # 转换为平方公里
@@ -106,8 +110,7 @@ class BaseTool(ABC):
                 bounds = geom.bounds
                 minx, miny, maxx, maxy = bounds
                 
-                # 计算网格大小（使每个网格约等于max_area_km2）
-                grid_size = np.sqrt(max_area_km2 * 1000000)  # 转换为平方米，然后开方得到边长
+                # 使用固定的90米网格大小
                 
                 # 创建网格
                 x_coords = np.arange(minx, maxx, grid_size)

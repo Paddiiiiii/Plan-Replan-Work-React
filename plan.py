@@ -1,9 +1,7 @@
 from typing import Dict, List
 from context_manager import ContextManager
-from utils.llm_utils import call_llm
 import logging
 import re
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -13,139 +11,89 @@ class PlanModule:
 
     def generate_plan(self, user_task: str) -> Dict:
         """
-        生成计划：将用户问题拆分成子问题，调用KAG获取知识，然后传递给Work模块
+        生成计划：直接使用原始任务调用KAG获取知识，然后传递给Work模块
         
         Args:
             user_task: 用户任务描述
             
         Returns:
-            包含原始问题、子问题列表、KAG结果和合并答案的字典
+            包含原始问题、KAG结果和合并答案的字典
         """
         logger.info(f"Plan阶段 - 开始处理用户任务: {user_task[:100]}...")
         
-        # 1. 拆分问题：将用户问题拆分成2-3个适合KAG知识召回的子问题
-        sub_questions = self._split_question(user_task)
-        logger.info(f"Plan阶段 - 拆分成 {len(sub_questions)} 个子问题")
-        for i, q in enumerate(sub_questions, 1):
-            logger.info(f"Plan阶段 - 子问题{i}: {q}")
+        # 直接使用原始任务调用KAG获取知识（不再拆分问题）
+        logger.info(f"Plan阶段 - 直接使用原始任务进行KAG检索")
         
-        # 2. 对每个子问题调用KAG获取知识
-        kag_results = self._call_kag_for_questions(sub_questions)
+        # 对原始任务调用KAG获取知识
+        kag_results = self._call_kag_for_questions([user_task])
         logger.info(f"Plan阶段 - KAG调用完成，获得 {len(kag_results)} 个结果")
         
-        # 3. 合并所有KAG答案
+        # 合并所有KAG答案
         combined_kag_answers = self._combine_kag_answers(kag_results)
         logger.info(f"Plan阶段 - 合并后的KAG答案长度: {len(combined_kag_answers)}")
         
-        # 4. 构建返回结构
+        logger.info(f"Plan阶段 - 提取完成，source_texts已添加到kag_results中")
+        
+        # 从kag_results的tasks中提取实体和关系
+        retrieved_entities = []
+        retrieved_relations = []
+        entity_id_set = set()  # 用于去重
+        relation_key_set = set()  # 用于去重
+        
+        for kag_result in kag_results:
+            tasks = kag_result.get("tasks", [])
+            for task in tasks:
+                # 从task的memory中提取
+                task_memory = task.get("memory", {})
+                if isinstance(task_memory, dict):
+                    # 从retriever结果中提取实体和关系
+                    if "retriever" in task_memory:
+                        retriever_output = task_memory["retriever"]
+                        self._extract_entities_relations_from_retriever_output(
+                            retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                        )
+                    
+                    # 从graph_data中提取
+                    if "graph_data" in task_memory:
+                        graph_data = task_memory["graph_data"]
+                        self._extract_entities_relations_from_graph_data(
+                            graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                        )
+                
+                # 从task的result中提取
+                task_result = task.get("result")
+                if task_result:
+                    self._extract_entities_relations_from_retriever_output(
+                        task_result, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                    )
+        
+        logger.info(f"Plan阶段 - 提取到 {len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系")
+        
+        # 构建返回结构（保持向后兼容，sub_questions包含原始任务）
         plan = {
             "original_query": user_task,
-            "sub_questions": sub_questions,
+            "sub_questions": [user_task],  # 保持向后兼容
             "kag_results": kag_results,
-            "combined_kag_answers": combined_kag_answers
+            "combined_kag_answers": combined_kag_answers,
+            "retrieved_entities": retrieved_entities,
+            "retrieved_relations": retrieved_relations
         }
         
         # 在终端显示Plan结果
         print("\n" + "=" * 80)
-        print("📋 Plan阶段结果（问题拆分 + KAG知识召回）")
+        print("📋 Plan阶段结果（KAG知识召回）")
         print("=" * 80)
         print(f"原始问题: {user_task}")
-        print(f"\n拆分后的子问题（共{len(sub_questions)}个）:")
-        for i, q in enumerate(sub_questions, 1):
-            print(f"  {i}. {q}")
-        print(f"\nKAG知识召回结果（共{len(kag_results)}个）:")
+        print(f"\nKAG知识召回结果:")
         for i, result in enumerate(kag_results, 1):
             answer_preview = result.get("answer", "")[:100]
             if len(result.get("answer", "")) > 100:
                 answer_preview += "..."
-            print(f"  问题{i}: {result.get('question', '')[:50]}...")
-            print(f"  答案{i}: {answer_preview}")
+            print(f"  问题: {result.get('question', '')[:80]}...")
+            print(f"  答案: {answer_preview}")
         print("=" * 80 + "\n")
         
         return plan
-    
-    def _split_question(self, user_task: str) -> List[str]:
-        """
-        将用户问题拆分成2-3个高度相关的子问题（适合KAG知识召回）
-        
-        Args:
-            user_task: 用户原始问题
-            
-        Returns:
-            子问题列表
-        """
-        prompt = self.context_manager.load_static_context("plan_prompt")
-        
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": f"请将以下用户问题拆分成2-3个高度相关的子问题，这些子问题应该适合从知识库中进行知识召回。\n\n用户问题: {user_task}"}
-        ]
-        
-        response = call_llm(messages)
-        logger.info(f"Plan阶段 - 问题拆分LLM响应长度: {len(response)}")
-        
-        # 解析LLM响应，提取子问题
-        sub_questions = self._parse_sub_questions(response, user_task)
-        
-        # 确保至少有1个问题，最多3个问题
-        if len(sub_questions) == 0:
-            # 如果无法拆分，返回原问题
-            logger.warning("Plan阶段 - 无法拆分问题，使用原问题")
-            return [user_task]
-        elif len(sub_questions) > 3:
-            # 如果超过3个，取前3个
-            logger.warning(f"Plan阶段 - 拆分出{len(sub_questions)}个子问题，只取前3个")
-            return sub_questions[:3]
-        
-        return sub_questions
-    
-    def _parse_sub_questions(self, response: str, user_task: str) -> List[str]:
-        """
-        解析LLM响应，提取子问题列表
-        
-        Args:
-            response: LLM响应文本
-            user_task: 原始用户问题（作为fallback）
-            
-        Returns:
-            子问题列表
-        """
-        # 尝试从JSON中解析
-        try:
-            json_match = re.search(r'\{[\s\S]*\}', response)
-            if json_match:
-                json_str = json_match.group()
-                data = json.loads(json_str)
-                if "sub_questions" in data and isinstance(data["sub_questions"], list):
-                    return [q.strip() for q in data["sub_questions"] if q.strip()]
-                if "questions" in data and isinstance(data["questions"], list):
-                    return [q.strip() for q in data["questions"] if q.strip()]
-        except Exception as e:
-            logger.warning(f"Plan阶段 - 无法从JSON解析子问题: {e}")
-        
-        # 尝试从编号列表中解析（如 "1. 问题1\n2. 问题2"）
-        lines = response.split('\n')
-        questions = []
-        for line in lines:
-            line = line.strip()
-            # 匹配 "1. 问题" 或 "问题1: 内容" 格式
-            match = re.match(r'^\d+[\.、:]\s*(.+)', line)
-            if match:
-                q = match.group(1).strip()
-                if q:
-                    questions.append(q)
-        
-        if questions:
-            return questions
-        
-        # 如果都无法解析，尝试按句子拆分（作为最后手段）
-        sentences = re.split(r'[。！？\n]', response)
-        questions = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 10]
-        if questions:
-            return questions[:3]  # 最多3个
-        
-        # 最后fallback：返回原问题
-        return [user_task]
     
     def _call_kag_for_questions(self, questions: List[str]) -> List[Dict]:
         """
@@ -162,28 +110,59 @@ class PlanModule:
         for question in questions:
             try:
                 logger.info(f"Plan阶段 - 调用KAG查询: {question[:50]}...")
-                
-                # 调用KAG（不使用缓存，确保每个问题都获取最新结果）
-                rag_context = self.context_manager.load_dynamic_context(
-                    question,
-                    top_k=5,
-                    use_cache=False
-                )
-                
-                # 获取KAG的完整结果
-                kag_input_query = getattr(self.context_manager, "last_kag_input_query", question)
-                kag_tasks = getattr(self.context_manager, "last_kag_tasks", [])
-                kag_final_answer = getattr(self.context_manager, "last_kag_answer", "")
-                
+
+                # 调用KAG推理（获取完整的tasks，包括实体和关系）
+                kag_result = self.context_manager.query_with_kag_reasoning(question)
+
                 # 清理KAG答案（移除reference标记等）
-                clean_answer = self._clean_kag_answer(kag_final_answer)
-                
+                clean_answer = self._clean_kag_answer(kag_result.get("answer", ""))
+
+                # 获取tasks，如果为空则尝试从raw_result中提取
+                tasks = kag_result.get("tasks", [])
+                if not tasks and "raw_result" in kag_result:
+                    raw_result = kag_result["raw_result"]
+                    if isinstance(raw_result, dict) and "Tasks" in raw_result:
+                        # 从raw_result中提取Tasks
+                        # raw_result中的Tasks格式是: [{'task': {...}, {'task': {...}}, ...]
+                        # 需要转换为标准格式: [{...}, {...}, ...]
+                        raw_tasks = raw_result["Tasks"]
+                        tasks = []
+                        for item in raw_tasks:
+                            if isinstance(item, dict) and "task" in item:
+                                # 提取内部task
+                                tasks.append(item["task"])
+                            elif isinstance(item, dict):
+                                # 如果已经是正确格式，直接添加
+                                tasks.append(item)
+                        logger.info(f"从raw_result中提取并转换了 {len(tasks)} 个tasks")
+
+                # 从tasks的result.chunks中提取检索到的原文
+                source_texts = []
+                for task in tasks:
+                    task_result = task.get("result")
+                    if task_result and isinstance(task_result, dict):
+                        chunks = task_result.get("chunks", [])
+                        logger.debug(f"Task包含 {len(chunks)} 个检索到的chunks")
+
+                        for chunk in chunks:
+                            if isinstance(chunk, dict):
+                                content = chunk.get("content", "")
+                                title = chunk.get("title", "")
+                                if content:
+                                    source_texts.append({
+                                        "title": title,
+                                        "content": content,
+                                        "chunk_id": chunk.get("chunk_id", ""),
+                                        "score": chunk.get("score", 0)
+                                    })
+
                 kag_results.append({
                     "question": question,
                     "answer": clean_answer,
-                    "tasks": kag_tasks,
-                    "input_query": kag_input_query,
-                    "references": rag_context  # 保留原始引用信息
+                    "tasks": tasks,
+                    "input_query": kag_result.get("input_query", question),
+                    "references": kag_result.get("references", []),  # 保留原始引用信息
+                    "source_texts": source_texts  # 保留检索到的原文
                 })
                 
                 logger.info(f"Plan阶段 - KAG查询完成，答案长度: {len(clean_answer)}")
@@ -248,3 +227,133 @@ class PlanModule:
                 combined_parts.append(f"子问题{i}: {question}\n答案{i}: （无相关信息）")
         
         return "\n\n".join(combined_parts)
+    
+    def _extract_entities_relations_from_retriever_output(self, retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
+        """从retriever输出中提取实体和关系"""
+        if isinstance(retriever_output, dict):
+            # 检查是否有graph_data或kg_graph
+            graph_data = retriever_output.get("graph_data") or retriever_output.get("kg_graph")
+            if graph_data:
+                self._extract_entities_relations_from_graph_data(
+                    graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                )
+            
+            # 检查是否有chunks，从chunks中提取实体和关系
+            chunks = retriever_output.get("chunks", [])
+            for chunk in chunks:
+                if isinstance(chunk, dict):
+                    # 尝试从chunk的metadata中提取实体和关系
+                    chunk_metadata = chunk.get("metadata", {})
+                    if chunk_metadata:
+                        # 检查是否有实体和关系信息
+                        entities = chunk_metadata.get("entities", [])
+                        relations = chunk_metadata.get("relations", [])
+                        if entities:
+                            for entity in entities:
+                                if isinstance(entity, dict):
+                                    entity_id = entity.get("id") or entity.get("name", "")
+                                    if entity_id and entity_id not in entity_id_set:
+                                        entity_id_set.add(entity_id)
+                                        retrieved_entities.append({
+                                            "id": entity_id,
+                                            "name": entity.get("name", entity_id),
+                                            "type": entity.get("type") or entity.get("label", "Unknown"),
+                                            "properties": entity.get("properties", {})
+                                        })
+                        if relations:
+                            for relation in relations:
+                                if isinstance(relation, dict):
+                                    source = relation.get("source") or relation.get("from_id") or relation.get("from", "")
+                                    target = relation.get("target") or relation.get("to_id") or relation.get("to", "")
+                                    relation_type = relation.get("type") or relation.get("label", "Unknown")
+                                    if source and target:
+                                        relation_key = f"{source}->{target}->{relation_type}"
+                                        if relation_key not in relation_key_set:
+                                            relation_key_set.add(relation_key)
+                                            retrieved_relations.append({
+                                                "source": source,
+                                                "target": target,
+                                                "type": relation_type,
+                                                "properties": relation.get("properties", {})
+                                            })
+    
+    def _extract_entities_relations_from_graph_data(self, graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
+        """从graph_data中提取实体和关系"""
+        if isinstance(graph_data, dict):
+            # 提取节点（实体）
+            nodes = graph_data.get("nodes", graph_data.get("resultNodes", []))
+            if not nodes and "result_nodes" in graph_data:
+                nodes = graph_data.get("result_nodes", [])
+            
+            for node in nodes:
+                if isinstance(node, dict):
+                    entity_id = node.get("id") or node.get("name", "")
+                    if entity_id and entity_id not in entity_id_set:
+                        entity_id_set.add(entity_id)
+                        retrieved_entities.append({
+                            "id": entity_id,
+                            "name": node.get("name", entity_id),
+                            "type": node.get("type") or node.get("label", "Unknown"),
+                            "properties": node.get("properties", {})
+                        })
+            
+            # 提取边（关系）
+            edges = graph_data.get("edges", graph_data.get("resultEdges", []))
+            if not edges and "result_edges" in graph_data:
+                edges = graph_data.get("result_edges", [])
+            
+            for edge in edges:
+                if isinstance(edge, dict):
+                    source = edge.get("from_id") or edge.get("from") or edge.get("source", "")
+                    target = edge.get("to_id") or edge.get("to") or edge.get("target", "")
+                    relation_type = edge.get("label") or edge.get("type", "Unknown")
+                    if source and target:
+                        relation_key = f"{source}->{target}->{relation_type}"
+                        if relation_key not in relation_key_set:
+                            relation_key_set.add(relation_key)
+                            retrieved_relations.append({
+                                "source": source,
+                                "target": target,
+                                "type": relation_type,
+                                "properties": edge.get("properties", {})
+                            })
+        elif hasattr(graph_data, "result_nodes") and hasattr(graph_data, "result_edges"):
+            # 如果是KgGraph对象，尝试转换为字典
+            try:
+                if hasattr(graph_data, "to_dict"):
+                    graph_dict = graph_data.to_dict()
+                    self._extract_entities_relations_from_graph_data(
+                        graph_dict, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                    )
+                else:
+                    # 直接从对象属性提取
+                    nodes = getattr(graph_data, "result_nodes", [])
+                    edges = getattr(graph_data, "result_edges", [])
+                    for node in nodes:
+                        if hasattr(node, "id"):
+                            entity_id = getattr(node, "id", "")
+                            if entity_id and entity_id not in entity_id_set:
+                                entity_id_set.add(entity_id)
+                                retrieved_entities.append({
+                                    "id": entity_id,
+                                    "name": getattr(node, "name", entity_id),
+                                    "type": getattr(node, "label", "Unknown"),
+                                    "properties": getattr(node, "properties", {}) if hasattr(node, "properties") else {}
+                                })
+                    for edge in edges:
+                        if hasattr(edge, "from_id") or hasattr(edge, "_from"):
+                            source = getattr(edge, "from_id", "") or getattr(edge, "_from", "")
+                            target = getattr(edge, "to_id", "") or getattr(edge, "to", "")
+                            relation_type = getattr(edge, "label", "Unknown")
+                            if source and target:
+                                relation_key = f"{source}->{target}->{relation_type}"
+                                if relation_key not in relation_key_set:
+                                    relation_key_set.add(relation_key)
+                                    retrieved_relations.append({
+                                        "source": source,
+                                        "target": target,
+                                        "type": relation_type,
+                                        "properties": getattr(edge, "properties", {}) if hasattr(edge, "properties") else {}
+                                    })
+            except Exception as e:
+                logger.debug(f"从graph_data对象提取实体和关系失败: {e}")

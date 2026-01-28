@@ -2,13 +2,14 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon
+from shapely.ops import unary_union
 import os
 from datetime import datetime
 from work.tools.base_tool import BaseTool
+from config import PATHS
 
-BASE_DIR = Path(__file__).parent.parent.parent
-RESULT_DIR = BASE_DIR / "result"
+RESULT_DIR = PATHS["result_geojson_dir"]
 
 
 class AreaFilterTool(BaseTool):
@@ -75,17 +76,71 @@ class AreaFilterTool(BaseTool):
         
         # 计算每个区域的面积
         areas_km2 = gdf_utm.geometry.area / 1000000  # 转换为平方公里
+        gdf_utm['area_km2'] = areas_km2
         
-        # 筛选：只保留面积大于等于min_area_km2的区域
-        valid_mask = areas_km2 >= min_area_km2
-        filtered_gdf_utm = gdf_utm[valid_mask].copy()
+        # 先筛选出面积大于等于min_area_km2的区域（这些区域直接保留）
+        large_regions = gdf_utm[areas_km2 >= min_area_km2].copy()
+        
+        # 对于面积小于min_area_km2的区域，需要合并相邻的区域
+        small_regions = gdf_utm[areas_km2 < min_area_km2].copy()
+        
+        merged_regions = []
+        
+        if not small_regions.empty:
+            # 使用unary_union合并所有相邻的小区域
+            # 这会自动将相邻的多边形合并成连续的区域
+            merged_geometry = unary_union(small_regions.geometry.tolist())
+            
+            # 处理合并后的几何图形（可能是MultiPolygon）
+            if isinstance(merged_geometry, MultiPolygon):
+                # 如果是MultiPolygon，分别处理每个子多边形
+                for geom in merged_geometry.geoms:
+                    if isinstance(geom, Polygon) and not geom.is_empty:
+                        area_km2 = geom.area / 1000000
+                        # 只保留合并后面积大于等于min_area_km2的区域
+                        if area_km2 >= min_area_km2:
+                            merged_regions.append({
+                                'geometry': geom,
+                                'area_km2': area_km2,
+                                'area_m2': geom.area
+                            })
+            elif isinstance(merged_geometry, Polygon) and not merged_geometry.is_empty:
+                # 如果是单个Polygon
+                area_km2 = merged_geometry.area / 1000000
+                if area_km2 >= min_area_km2:
+                    merged_regions.append({
+                        'geometry': merged_geometry,
+                        'area_km2': area_km2,
+                        'area_m2': merged_geometry.area
+                    })
+        
+        # 合并大区域和合并后的小区域
+        all_regions = []
+        
+        # 添加大区域（保留原始属性）
+        if not large_regions.empty:
+            for idx, row in large_regions.iterrows():
+                all_regions.append({
+                    'geometry': row.geometry,
+                    'area_km2': row['area_km2'],
+                    'area_m2': row.geometry.area
+                })
+        
+        # 添加合并后的小区域
+        all_regions.extend(merged_regions)
+        
+        # 创建最终的GeoDataFrame
+        if all_regions:
+            filtered_gdf_utm = gpd.GeoDataFrame(all_regions, crs=gdf_utm.crs)
+        else:
+            # 没有符合条件的区域
+            filtered_gdf_utm = gpd.GeoDataFrame([], crs=gdf_utm.crs)
         
         # 转换回WGS84
-        filtered_gdf = filtered_gdf_utm.to_crs('EPSG:4326')
-        
-        # 更新面积字段
-        filtered_gdf['area_m2'] = filtered_gdf_utm.geometry.area
-        filtered_gdf['area_km2'] = filtered_gdf['area_m2'] / 1000000
+        if not filtered_gdf_utm.empty:
+            filtered_gdf = filtered_gdf_utm.to_crs('EPSG:4326')
+        else:
+            filtered_gdf = gpd.GeoDataFrame([], crs='EPSG:4326')
         
         # 裁剪到地理边界
         filtered_gdf = self.clip_to_bounds(filtered_gdf)

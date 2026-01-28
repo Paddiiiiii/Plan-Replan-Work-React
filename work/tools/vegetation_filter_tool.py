@@ -11,9 +11,11 @@ import os
 from datetime import datetime
 from work.tools.base_tool import BaseTool
 
+from config import PATHS
+
 BASE_DIR = Path(__file__).parent.parent.parent
 WORLDCOVER_PATH = BASE_DIR / "data" / "WorldCover_10m_2020_v100_N30E117.tif"
-RESULT_DIR = BASE_DIR / "result"
+RESULT_DIR = PATHS["result_geojson_dir"]
 
 WORLDCOVER_CLASSES = {
     10: "树",
@@ -230,7 +232,7 @@ class VegetationFilterTool(BaseTool):
         
         # 如果存在大面积区域（>1平方公里），进行细分
         if gdf['area_km2'].max() > 1.0:
-            gdf = self.subdivide_large_regions(gdf, max_area_km2=1.0)
+            gdf = self.subdivide_large_regions(gdf, max_area_km2=0.0081)
 
         if vegetation_types is None and exclude_types is None:
             os.makedirs(output_path.parent, exist_ok=True)

@@ -104,7 +104,8 @@ async def root():
             },
             "结果文件": {
                 "/api/results": "GET - 获取所有结果文件列表",
-                "/api/results/{filename}": "GET - 获取特定结果文件内容"
+                "/api/results/{filename}": "GET - 获取特定结果文件内容（GeoJSON）",
+                "/api/results/{filename}/metadata": "GET - 获取结果文件的metadata信息（区域、参考点、问答结果、KAG实体关系等）"
             },
             "工具与系统": {
                 "/api/tools": "GET - 获取所有可用工具列表"
@@ -297,37 +298,6 @@ async def get_kg_relations(relation_type: str = None, limit: int = 100):
         logger.error(f"获取知识图谱关系失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取关系失败: {str(e)}")
 
-@app.post("/api/kg/entities")
-async def add_kg_entity(request: Dict = Body(...)):
-    """添加实体到知识图谱（已废弃，请使用KAG开发者模式构建知识库）"""
-    raise HTTPException(
-        status_code=410,
-        detail="此接口已废弃。请使用KAG开发者模式来构建和更新知识库。"
-    )
-
-@app.delete("/api/kg/entities/{entity_id}")
-async def delete_kg_entity(entity_id: str):
-    """删除知识图谱中的实体（已废弃，请使用KAG开发者模式管理知识库）"""
-    raise HTTPException(
-        status_code=410,
-        detail="此接口已废弃。请使用KAG开发者模式来管理知识库。"
-    )
-
-
-@app.put("/api/knowledge/update")
-async def update_knowledge_base():
-    """
-    批量更新knowledge集合（已废弃）
-    
-    注意：此接口已废弃。请使用KAG开发者模式来构建和更新知识库：
-    1. 将文本数据文件放置在 KAG/kag/examples/MilitaryDeployment/builder/data/ 目录下
-    2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库
-    """
-    raise HTTPException(
-        status_code=410, 
-        detail="此接口已废弃。请使用KAG开发者模式来构建知识库。"
-    )
-
 @app.post("/api/kag/query", tags=["知识图谱"])
 async def kag_query(request: Dict = Body(...)):
     """
@@ -394,7 +364,16 @@ async def get_results_list():
                 "count": 0
             }
 
-        result_files = list(result_dir.glob("*.geojson"))
+        # 从geojson子文件夹读取文件
+        geojson_dir = PATHS["result_geojson_dir"]
+        if not geojson_dir.exists():
+            return {
+                "success": True,
+                "results": [],
+                "count": 0
+            }
+        
+        result_files = list(geojson_dir.glob("*.geojson"))
         result_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
 
         results = []
@@ -416,6 +395,96 @@ async def get_results_list():
         logger.error(f"获取结果文件列表失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取结果文件列表失败: {str(e)}")
 
+@app.get("/api/results/{filename:path}/metadata", tags=["结果文件"])
+async def get_result_metadata(filename: str):
+    """
+    获取特定结果文件的metadata信息（从新的文件夹结构读取）
+    
+    路径参数：
+    - filename: GeoJSON文件名（如 `buffer_filter_500m_20251223.geojson`），支持URL编码的中文字符
+    
+    返回合并后的metadata JSON，包含：
+    - 区域信息（从regions文件夹）
+    - LLM思考结果（从llm_thinking文件夹）
+    - 实体关系图（从kg_graph文件夹）
+    """
+    try:
+        from urllib.parse import unquote
+        import json
+        
+        # 解码URL编码的文件名（处理中文字符）
+        decoded_filename = unquote(filename, encoding='utf-8')
+        
+        # 检查文件名是否以.geojson结尾
+        if not decoded_filename.endswith('.geojson'):
+            raise HTTPException(status_code=400, detail="文件名格式错误，未找到.geojson文件")
+        
+        # 获取基础文件名（不含扩展名）
+        base_name = Path(decoded_filename).stem
+        
+        # 从3个不同的文件夹读取数据
+        regions_dir = PATHS["result_regions_dir"]
+        llm_thinking_dir = PATHS["result_llm_thinking_dir"]
+        kg_graph_dir = PATHS["result_kg_graph_dir"]
+        
+        # 合并metadata数据
+        metadata = {
+            "result_file": decoded_filename,
+            "regions": [],
+            "reference_points": [],
+            "filter_params": [],
+            "kag_qa_results": [],
+            "retrieved_entities": [],
+            "retrieved_relations": [],
+            "first_llm_response": "",
+            "second_llm_response": ""
+        }
+        
+        # 1. 读取区域信息
+        regions_path = regions_dir / f"{base_name}.json"
+        if regions_path.exists():
+            with open(regions_path, "r", encoding="utf-8") as f:
+                regions_data = json.load(f)
+                metadata.update({
+                    "timestamp": regions_data.get("timestamp", ""),
+                    "unit": regions_data.get("unit"),
+                    "original_query": regions_data.get("original_query", ""),
+                    "regions": regions_data.get("regions", []),
+                    "reference_points": regions_data.get("reference_points", []),
+                    "filter_params": regions_data.get("filter_params", [])
+                })
+        
+        # 2. 读取LLM思考结果
+        llm_thinking_path = llm_thinking_dir / f"{base_name}.json"
+        if llm_thinking_path.exists():
+            with open(llm_thinking_path, "r", encoding="utf-8") as f:
+                llm_data = json.load(f)
+                metadata.update({
+                    "first_llm_response": llm_data.get("first_llm_response", ""),
+                    "second_llm_response": llm_data.get("second_llm_response", ""),
+                    "kag_qa_results": llm_data.get("kag_qa_results", [])
+                })
+        
+        # 3. 读取实体关系图
+        kg_graph_path = kg_graph_dir / f"{base_name}.json"
+        if kg_graph_path.exists():
+            with open(kg_graph_path, "r", encoding="utf-8") as f:
+                kg_data = json.load(f)
+                metadata.update({
+                    "retrieved_entities": kg_data.get("retrieved_entities", []),
+                    "retrieved_relations": kg_data.get("retrieved_relations", [])
+                })
+        
+        return {
+            "success": True,
+            "metadata": metadata
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取结果metadata失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取结果metadata失败: {str(e)}")
+
 @app.get("/api/results/{filename:path}", tags=["结果文件"])
 async def get_result_file(filename: str):
     """
@@ -433,10 +502,11 @@ async def get_result_file(filename: str):
         # 解码URL编码的文件名（处理中文字符）
         decoded_filename = unquote(filename, encoding='utf-8')
         
-        result_dir = PATHS["result_dir"]
-        file_path = result_dir / decoded_filename
+        # 从geojson子文件夹读取文件
+        geojson_dir = PATHS["result_geojson_dir"]
+        file_path = geojson_dir / decoded_filename
 
-        if not file_path.resolve().is_relative_to(result_dir.resolve()):
+        if not file_path.resolve().is_relative_to(geojson_dir.resolve()):
             raise HTTPException(status_code=403, detail="访问被拒绝")
 
         if not file_path.exists():
