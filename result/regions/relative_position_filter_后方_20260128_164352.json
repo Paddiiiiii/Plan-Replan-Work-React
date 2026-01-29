@@ -1,0 +1,59 @@
+{
+  "result_file": "relative_position_filter_后方_20260128_164352.geojson",
+  "timestamp": "2026-01-28T16:43:57.673152",
+  "unit": null,
+  "original_query": "我已知一个迫击炮排和一个装甲反坦克排的位置，帮我找基指的位置。迫击炮排坐标： (118.522, 31.515)，装甲反坦克排坐标： (118.552, 31.520)",
+  "regions": [],
+  "reference_points": [
+    {
+      "point": {
+        "lon": 118.522,
+        "lat": 31.515
+      },
+      "direction": 0.0
+    },
+    {
+      "point": {
+        "lon": 118.552,
+        "lat": 31.52
+      },
+      "direction": 0.0
+    }
+  ],
+  "filter_params": [
+    {
+      "step": 1,
+      "tool": "distance_filter_tool",
+      "params": {
+        "参考点坐标": "(118.522000, 31.515000)",
+        "最大距离": "15000 米"
+      }
+    },
+    {
+      "step": 2,
+      "tool": "distance_filter_tool",
+      "params": {
+        "参考点坐标": "(118.552000, 31.520000)",
+        "最大距离": "15000 米"
+      }
+    },
+    {
+      "step": 3,
+      "tool": "relative_position_filter_tool",
+      "params": {
+        "参考点坐标": "(118.522000, 31.515000)",
+        "参考方向": "0.0°",
+        "相对位置类型": "后方"
+      }
+    },
+    {
+      "step": 4,
+      "tool": "relative_position_filter_tool",
+      "params": {
+        "参考点坐标": "(118.552000, 31.520000)",
+        "参考方向": "0.0°",
+        "相对位置类型": "后方"
+      }
+    }
+  ]
+}

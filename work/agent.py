@@ -716,7 +716,10 @@ class WorkAgent:
         # 如果执行成功且有最终结果路径，保存metadata文件
         if last_result_path:
             try:
-                self._save_result_metadata(last_result_path, plan, results, unit)
+                kg_graph_image_filename = self._save_result_metadata(last_result_path, plan, results, unit)
+                # 将图片文件名添加到plan中，供前端使用
+                if kg_graph_image_filename:
+                    plan["kg_graph_image_filename"] = kg_graph_image_filename
             except Exception as e:
                 logger.warning(f"保存结果metadata失败: {e}", exc_info=True)
         
@@ -943,11 +946,9 @@ class WorkAgent:
             # 确保各个文件夹存在
             regions_dir = PATHS["result_regions_dir"]
             llm_thinking_dir = PATHS["result_llm_thinking_dir"]
-            kg_graph_dir = PATHS["result_kg_graph_dir"]
             
             regions_dir.mkdir(parents=True, exist_ok=True)
             llm_thinking_dir.mkdir(parents=True, exist_ok=True)
-            kg_graph_dir.mkdir(parents=True, exist_ok=True)
             
             # 提取区域信息（从plan或session_state中获取，这里先尝试从plan中解析）
             regions = []
@@ -999,9 +1000,23 @@ class WorkAgent:
             
             logger.info(f"从plan中获取的实体数量: {len(retrieved_entities)}, 关系数量: {len(retrieved_relations)}")
             
-            # 如果plan中没有，则从kag_results的tasks中提取检索到的实体和关系（向后兼容）
+            # 如果plan中没有，则从kag_solver的checkpoint中提取实体和关系
             if not retrieved_entities and not retrieved_relations:
-                logger.info("plan中没有retrieved_entities和retrieved_relations，尝试从kag_results中提取")
+                logger.info("plan中没有retrieved_entities和retrieved_relations，尝试从kag_solver的checkpoint中提取")
+                try:
+                    kg_data = self.context_manager.kag_solver.get_kg_data()
+                    if kg_data and kg_data.get("entity_count", 0) > 0:
+                        retrieved_entities = kg_data.get("entities", [])
+                        retrieved_relations = kg_data.get("relations", [])
+                        logger.info(f"从kag_solver的checkpoint中提取到 {len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系")
+                    else:
+                        logger.warning("从kag_solver的checkpoint中提取实体和关系失败或结果为空")
+                except Exception as e:
+                    logger.error(f"从kag_solver的checkpoint中提取实体和关系失败: {e}", exc_info=True)
+            
+            # 如果仍然没有，则从kag_results的tasks中提取检索到的实体和关系（向后兼容）
+            if not retrieved_entities and not retrieved_relations:
+                logger.info("仍然没有实体和关系，尝试从kag_results中提取")
                 entity_id_set = set()  # 用于去重
                 relation_key_set = set()  # 用于去重
                 
@@ -1154,28 +1169,149 @@ class WorkAgent:
                 "original_query": original_query,
                 "first_llm_response": plan.get("first_llm_response", ""),
                 "second_llm_response": plan.get("second_llm_response", ""),
-                "kag_qa_results": kag_qa_results
+                "kag_qa_results": kag_qa_results,
+                "retrieved_entities": retrieved_entities,
+                "retrieved_relations": retrieved_relations
             }
             llm_thinking_path = llm_thinking_dir / f"{base_name}.json"
             with open(llm_thinking_path, "w", encoding="utf-8") as f:
                 json.dump(llm_thinking_data, f, ensure_ascii=False, indent=2)
             logger.info(f"已保存LLM思考结果: {llm_thinking_path}")
             
-            # 3. 保存实体关系图到kg_graph文件夹
-            kg_graph_data = {
-                "result_file": result_file.name,
-                "timestamp": datetime.now().isoformat(),
-                "unit": unit,
-                "original_query": original_query,
-                "retrieved_entities": retrieved_entities,
-                "retrieved_relations": retrieved_relations
-            }
-            kg_graph_path = kg_graph_dir / f"{base_name}.json"
-            with open(kg_graph_path, "w", encoding="utf-8") as f:
-                json.dump(kg_graph_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"已保存实体关系图: {kg_graph_path}")
+            # 3. 保存实体关系图到kg_graph_images文件夹（生成静态图片）
+            kg_graph_image_filename = None
+            if retrieved_entities or retrieved_relations:
+                try:
+                    import matplotlib.pyplot as plt
+                    import matplotlib
+                    import networkx as nx
+                    
+                    matplotlib.use('Agg')
+                    
+                    fig, ax = plt.subplots(figsize=(14, 10))
+                    ax.set_facecolor('#f5f5f5')
+                    
+                    entity_type_colors = {
+                        "MilitaryUnit": "#FF6B6B",
+                        "TerrainFeature": "#4ECDC4",
+                        "Weapon": "#FFE66D",
+                        "Obstacle": "#95E1D3",
+                        "DefensePosition": "#F38181",
+                        "CombatPosition": "#AA96DA",
+                        "UnitOrganization": "#FCBAD3",
+                        "CombatTask": "#A8E6CF",
+                        "FireSupport": "#FFD3A5",
+                        "ObservationPost": "#FD9853",
+                        "KillZone": "#A8DADC",
+                        "ObstacleBelt": "#457B9D",
+                        "SupportPoint": "#E63946",
+                        "ApproachRoute": "#F1FAEE"
+                    }
+                    
+                    G = nx.DiGraph()
+                    
+                    entity_map = {}
+                    for entity in retrieved_entities:
+                        entity_id = entity.get("id", "")
+                        entity_name = entity.get("name", entity_id)
+                        entity_type = entity.get("type", "Unknown")
+                        color = entity_type_colors.get(entity_type, "#888888")
+                        
+                        G.add_node(
+                            entity_id,
+                            label=entity_name,
+                            type=entity_type,
+                            color=color
+                        )
+                        entity_map[entity_id] = entity
+                    
+                    for relation in retrieved_relations:
+                        source = relation.get("source", "")
+                        target = relation.get("target", "")
+                        relation_type = relation.get("type", "Unknown")
+                        
+                        if source in entity_map and target in entity_map:
+                            G.add_edge(
+                                source,
+                                target,
+                                label=relation_type
+                            )
+                    
+                    if len(G.nodes()) > 0:
+                        pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
+                        
+                        node_colors = [G.nodes[node].get('color', '#888888') for node in G.nodes()]
+                        node_labels = {node: G.nodes[node].get('label', node)[:15] for node in G.nodes()}
+                        
+                        nx.draw_networkx_nodes(
+                            G, pos,
+                            node_color=node_colors,
+                            node_size=2000,
+                            alpha=0.9,
+                            edgecolors='white',
+                            linewidths=2,
+                            ax=ax
+                        )
+                        
+                        nx.draw_networkx_edges(
+                            G, pos,
+                            edge_color='#666666',
+                            width=2,
+                            alpha=0.6,
+                            arrowsize=20,
+                            arrowstyle='->',
+                            ax=ax
+                        )
+                        
+                        nx.draw_networkx_labels(
+                            G, pos,
+                            labels=node_labels,
+                            font_size=10,
+                            font_weight='bold',
+                            font_family='Microsoft YaHei',
+                            ax=ax
+                        )
+                        
+                        edge_labels = nx.get_edge_attributes(G, 'label')
+                        nx.draw_networkx_edge_labels(
+                            G, pos,
+                            edge_labels=edge_labels,
+                            font_size=8,
+                            font_family='Microsoft YaHei',
+                            ax=ax
+                        )
+                        
+                        ax.set_title(f'实体关系图 ({len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系)', 
+                                   fontsize=16, fontweight='bold', pad=20)
+                        ax.axis('off')
+                        
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        kg_graph_image_filename = f"kg_graph_{timestamp}.png"
+                        
+                        kg_graph_images_dir = PATHS["result_dir"] / "kg_graph_images"
+                        kg_graph_images_dir.mkdir(parents=True, exist_ok=True)
+                        kg_graph_image_path = kg_graph_images_dir / kg_graph_image_filename
+                        
+                        plt.tight_layout()
+                        plt.savefig(kg_graph_image_path, dpi=150, bbox_inches='tight', facecolor='white')
+                        plt.close(fig)
+                        
+                        logger.info(f"已保存实体关系图: {kg_graph_image_path}")
+                except Exception as e:
+                    logger.error(f"保存实体关系图失败: {e}", exc_info=True)
+            
+            # 将图片文件名保存到llm_thinking_data中
+            if kg_graph_image_filename:
+                llm_thinking_data["kg_graph_image_filename"] = kg_graph_image_filename
+                # 重新保存llm_thinking文件以包含图片文件名
+                with open(llm_thinking_path, "w", encoding="utf-8") as f:
+                    json.dump(llm_thinking_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"已更新LLM思考结果（包含图片文件名）: {llm_thinking_path}")
         except Exception as e:
             logger.error(f"保存结果metadata失败: {e}", exc_info=True)
+            return None
+        
+        return kg_graph_image_filename
     
     def _extract_entities_relations_from_retriever_output(self, retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
         """从retriever输出中提取实体和关系"""

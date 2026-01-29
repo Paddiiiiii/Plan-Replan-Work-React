@@ -2,28 +2,30 @@ import streamlit as st
 import requests
 from typing import List, Dict
 
-def display_kag_entities_relations(entities: List[Dict], relations: List[Dict]):
-    """显示KAG检索到的实体和关系图"""
+def display_kag_entities_relations(entities: List[Dict], relations: List[Dict], show_title: bool = True):
+    """显示KAG检索到的实体和关系图（生成静态图片）"""
     if not entities and not relations:
         return
     
     total_entities = len(entities)
     total_relations = len(relations)
     
-    st.subheader("🔍 KAG检索到的实体和关系")
-    st.write(f"检索到 {total_entities} 个实体, {total_relations} 个关系")
+    if show_title:
+        st.subheader("🔍 KAG检索到的实体和关系")
+        st.write(f"检索到 {total_entities} 个实体, {total_relations} 个关系")
     
     try:
-        from pyvis.network import Network
+        import matplotlib.pyplot as plt
+        import matplotlib
+        import networkx as nx
         import tempfile
+        import os
+        from datetime import datetime
         
-        net = Network(
-            height="600px",
-            width="100%",
-            bgcolor="#222222",
-            font_color="white",
-            directed=True
-        )
+        matplotlib.use('Agg')
+        
+        fig, ax = plt.subplots(figsize=(14, 10))
+        ax.set_facecolor('#f5f5f5')
         
         entity_type_colors = {
             "MilitaryUnit": "#FF6B6B",
@@ -42,6 +44,8 @@ def display_kag_entities_relations(entities: List[Dict], relations: List[Dict]):
             "ApproachRoute": "#F1FAEE"
         }
         
+        G = nx.DiGraph()
+        
         entity_map = {}
         for entity in entities:
             entity_id = entity.get("id", "")
@@ -49,19 +53,11 @@ def display_kag_entities_relations(entities: List[Dict], relations: List[Dict]):
             entity_type = entity.get("type", "Unknown")
             color = entity_type_colors.get(entity_type, "#888888")
             
-            title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
-            properties = entity.get("properties", {})
-            if properties:
-                title += "<br>属性:"
-                for key, value in list(properties.items())[:5]:
-                    title += f"<br>  {key}: {value}"
-            
-            net.add_node(
+            G.add_node(
                 entity_id,
-                label=entity_name[:20],
-                title=title,
-                color=color,
-                size=20
+                label=entity_name,
+                type=entity_type,
+                color=color
             )
             entity_map[entity_id] = entity
         
@@ -71,58 +67,104 @@ def display_kag_entities_relations(entities: List[Dict], relations: List[Dict]):
             relation_type = relation.get("type", "Unknown")
             
             if source in entity_map and target in entity_map:
-                net.add_edge(
+                G.add_edge(
                     source,
                     target,
-                    label=relation_type[:15],
-                    title=relation_type,
-                    color="#888888",
-                    width=2
+                    label=relation_type
                 )
         
-        net.set_options("""
-        {
-          "physics": {
-            "enabled": true,
-            "barnesHut": {
-              "gravitationalConstant": -2000,
-              "centralGravity": 0.1,
-              "springLength": 200,
-              "springConstant": 0.04,
-              "damping": 0.09
-            },
-            "stabilization": {
-              "iterations": 100
-            }
-          },
-          "interaction": {
-            "hover": true,
-            "tooltipDelay": 200,
-            "zoomView": true,
-            "dragView": true
-          }
-        }
-        """)
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
-            net.save_graph(html_file.name)
-            html_path = html_file.name
-        
-        try:
-            with open(html_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
+        if len(G.nodes()) > 0:
+            pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
             
-            st.components.v1.html(html_content, height=650, scrolling=True)
-        finally:
-            try:
-                import os
-                os.unlink(html_path)
-            except:
-                pass
-
-    except ImportError:
-        st.error("pyvis库未安装，请运行: pip install pyvis")
-        st.code("pip install pyvis", language="bash")
+            node_colors = [G.nodes[node].get('color', '#888888') for node in G.nodes()]
+            node_labels = {node: G.nodes[node].get('label', node)[:15] for node in G.nodes()}
+            
+            nx.draw_networkx_nodes(
+                G, pos,
+                node_color=node_colors,
+                node_size=2000,
+                alpha=0.9,
+                edgecolors='white',
+                linewidths=2,
+                ax=ax
+            )
+            
+            nx.draw_networkx_edges(
+                G, pos,
+                edge_color='#666666',
+                width=2,
+                alpha=0.6,
+                arrowsize=20,
+                arrowstyle='->',
+                ax=ax
+            )
+            
+            nx.draw_networkx_labels(
+                G, pos,
+                labels=node_labels,
+                font_size=10,
+                font_weight='bold',
+                font_family='Microsoft YaHei',
+                ax=ax
+            )
+            
+            edge_labels = nx.get_edge_attributes(G, 'label')
+            nx.draw_networkx_edge_labels(
+                G, pos,
+                edge_labels=edge_labels,
+                font_size=8,
+                font_family='Microsoft YaHei',
+                ax=ax
+            )
+            
+            ax.set_title(f'实体关系图 ({total_entities} 个实体, {total_relations} 个关系)', 
+                       fontsize=16, fontweight='bold', pad=20)
+            ax.axis('off')
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            image_filename = f"kg_graph_{timestamp}.png"
+            
+            kg_graph_dir = os.path.join(os.path.dirname(__file__), "result", "kg_graph_images")
+            os.makedirs(kg_graph_dir, exist_ok=True)
+            image_path = os.path.join(kg_graph_dir, image_filename)
+            
+            plt.tight_layout()
+            plt.savefig(image_path, dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            
+            st.image(image_path, use_column_width=True)
+            
+            with st.expander("📊 实体详情"):
+                for entity in entities:
+                    entity_id = entity.get("id", "")
+                    entity_name = entity.get("name", entity_id)
+                    entity_type = entity.get("type", "Unknown")
+                    properties = entity.get("properties", {})
+                    
+                    st.markdown(f"**{entity_name}** ({entity_type})")
+                    if properties:
+                        for key, value in list(properties.items())[:5]:
+                            st.markdown(f"  - {key}: {value}")
+                    st.markdown("---")
+            
+            with st.expander("🔗 关系详情"):
+                for relation in relations:
+                    source = relation.get("source", "")
+                    target = relation.get("target", "")
+                    relation_type = relation.get("type", "Unknown")
+                    
+                    source_name = entity_map.get(source, {}).get("name", source) if isinstance(entity_map.get(source), dict) else source
+                    target_name = entity_map.get(target, {}).get("name", target) if isinstance(entity_map.get(target), dict) else target
+                    
+                    st.markdown(f"**{source_name}** → **{relation_type}** → **{target_name}**")
+                    st.markdown("---")
+        
+        else:
+            st.info("没有找到实体和关系数据")
+    
+    except ImportError as e:
+        st.error(f"缺少必要的库: {e}")
+        st.code("pip install matplotlib networkx", language="bash")
     except Exception as e:
         st.error(f"生成可视化失败: {e}")
         import traceback

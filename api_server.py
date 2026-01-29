@@ -462,7 +462,10 @@ async def get_result_metadata(filename: str):
                 metadata.update({
                     "first_llm_response": llm_data.get("first_llm_response", ""),
                     "second_llm_response": llm_data.get("second_llm_response", ""),
-                    "kag_qa_results": llm_data.get("kag_qa_results", [])
+                    "kag_qa_results": llm_data.get("kag_qa_results", []),
+                    "kg_graph_image_filename": llm_data.get("kg_graph_image_filename"),
+                    "retrieved_entities": llm_data.get("retrieved_entities", []),
+                    "retrieved_relations": llm_data.get("retrieved_relations", [])
                 })
         
         # 3. 读取实体关系图
@@ -525,6 +528,184 @@ async def get_result_file(filename: str):
     except Exception as e:
         logger.error(f"获取结果文件失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取结果文件失败: {str(e)}")
+
+@app.get("/api/latest-result", tags=["结果文件"])
+async def get_latest_result():
+    """
+    获取最近一次执行的结果（子图谱图片和LLM思考文本）
+    
+    返回包含以下内容的JSON：
+    - graph_image_base64: 最新子图谱图片的base64编码
+    - first_llm_response: 第一次LLM响应
+    - second_llm_response: 第二次LLM响应
+    - kag_qa_results: KAG问答结果列表
+    - timestamp: 时间戳
+    - original_query: 原始查询
+    """
+    try:
+        import base64
+        
+        kg_graph_images_dir = PATHS["result_kg_graph_dir"].parent / "kg_graph_images"
+        llm_thinking_dir = PATHS["result_llm_thinking_dir"]
+        
+        graph_image_base64 = None
+        graph_image_filename = None
+        first_llm_response = ""
+        second_llm_response = ""
+        kag_qa_results = []
+        timestamp = ""
+        original_query = ""
+        
+        if kg_graph_images_dir.exists():
+            image_files = list(kg_graph_images_dir.glob("kg_graph_*.png"))
+            if image_files:
+                latest_image = max(image_files, key=lambda f: f.stat().st_mtime)
+                graph_image_filename = latest_image.name
+                
+                with open(latest_image, "rb") as f:
+                    image_bytes = f.read()
+                    graph_image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        if llm_thinking_dir.exists():
+            json_files = list(llm_thinking_dir.glob("*.json"))
+            if json_files:
+                latest_json = max(json_files, key=lambda f: f.stat().st_mtime)
+                
+                with open(latest_json, "r", encoding="utf-8") as f:
+                    llm_data = f.read()
+                    import json
+                    llm_json = json.loads(llm_data)
+                    
+                    first_llm_response = llm_json.get("first_llm_response", "")
+                    second_llm_response = llm_json.get("second_llm_response", "")
+                    kag_qa_results = llm_json.get("kag_qa_results", [])
+                    timestamp = llm_json.get("timestamp", "")
+                    original_query = llm_json.get("original_query", "")
+        
+        return {
+            "success": True,
+            "data": {
+                "graph_image_base64": graph_image_base64,
+                "graph_image_filename": graph_image_filename,
+                "first_llm_response": first_llm_response,
+                "second_llm_response": second_llm_response,
+                "kag_qa_results": kag_qa_results,
+                "timestamp": timestamp,
+                "original_query": original_query
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取最新结果失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取最新结果失败: {str(e)}")
+
+@app.get("/api/latest-graph-image", tags=["结果文件"])
+async def get_latest_graph_image():
+    """
+    获取最近一次执行的子图谱图片
+    
+    返回最新的PNG图片文件
+    """
+    try:
+        kg_graph_images_dir = PATHS["result_kg_graph_dir"].parent / "kg_graph_images"
+        
+        if not kg_graph_images_dir.exists():
+            raise HTTPException(status_code=404, detail="子图谱图片目录不存在")
+        
+        image_files = list(kg_graph_images_dir.glob("kg_graph_*.png"))
+        if not image_files:
+            raise HTTPException(status_code=404, detail="未找到子图谱图片")
+        
+        latest_image = max(image_files, key=lambda f: f.stat().st_mtime)
+        
+        return FileResponse(
+            path=str(latest_image),
+            media_type="image/png",
+            filename=latest_image.name
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取最新子图谱图片失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取最新子图谱图片失败: {str(e)}")
+
+@app.get("/api/latest-llm-thinking", tags=["结果文件"])
+async def get_latest_llm_thinking():
+    """
+    获取最近一次执行的LLM思考文本
+    
+    返回包含LLM思考结果的JSON
+    """
+    try:
+        llm_thinking_dir = PATHS["result_llm_thinking_dir"]
+        
+        if not llm_thinking_dir.exists():
+            raise HTTPException(status_code=404, detail="LLM思考结果目录不存在")
+        
+        json_files = list(llm_thinking_dir.glob("*.json"))
+        if not json_files:
+            raise HTTPException(status_code=404, detail="未找到LLM思考结果")
+        
+        latest_json = max(json_files, key=lambda f: f.stat().st_mtime)
+        
+        with open(latest_json, "r", encoding="utf-8") as f:
+            llm_data = f.read()
+            import json
+            llm_json = json.loads(llm_data)
+            
+            return {
+                "success": True,
+                "data": {
+                    "first_llm_response": llm_json.get("first_llm_response", ""),
+                    "second_llm_response": llm_json.get("second_llm_response", ""),
+                    "kag_qa_results": llm_json.get("kag_qa_results", []),
+                    "timestamp": llm_json.get("timestamp", ""),
+                    "original_query": llm_json.get("original_query", "")
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取最新LLM思考结果失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取最新LLM思考结果失败: {str(e)}")
+
+@app.get("/api/kg-graph-images/{filename:path}", tags=["结果文件"])
+async def get_kg_graph_image(filename: str):
+    """
+    获取指定的子图谱图片
+    
+    Args:
+        filename: 图片文件名
+        
+    Returns:
+        PNG图片文件
+    """
+    try:
+        kg_graph_images_dir = PATHS["result_kg_graph_dir"].parent / "kg_graph_images"
+        
+        if not kg_graph_images_dir.exists():
+            raise HTTPException(status_code=404, detail="子图谱图片目录不存在")
+        
+        image_path = kg_graph_images_dir / filename
+        
+        if not image_path.resolve().is_relative_to(kg_graph_images_dir.resolve()):
+            raise HTTPException(status_code=403, detail="访问被拒绝")
+        
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail=f"图片文件 {filename} 不存在")
+        
+        if not filename.endswith('.png'):
+            raise HTTPException(status_code=400, detail="只支持PNG图片")
+        
+        return FileResponse(
+            path=str(image_path),
+            media_type="image/png",
+            filename=filename
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取子图谱图片失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取子图谱图片失败: {str(e)}")
 
 def run_api_server(port: int = 8000):
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

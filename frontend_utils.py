@@ -69,7 +69,7 @@ def format_filter_params(steps: List[Dict]) -> List[Dict]:
     格式化筛选参数，用于友好显示
     
     Args:
-        steps: 工具执行的步骤列表
+        steps: 工具执行的步骤列表（可以是plan中的步骤或执行结果中的步骤）
         
     Returns:
         格式化后的筛选参数列表
@@ -77,10 +77,28 @@ def format_filter_params(steps: List[Dict]) -> List[Dict]:
     formatted_params_list = []
     
     for step_result in steps:
-        if not step_result.get("success"):
+        # 兼容两种格式：plan中的步骤和执行结果中的步骤
+        # plan中的步骤没有success字段，执行结果中的步骤有success字段
+        if "success" in step_result and not step_result.get("success"):
             continue
         
+        # 获取工具名称：优先使用tool字段，如果没有则使用type字段映射
         tool_name = step_result.get("tool", "")
+        step_type = step_result.get("type", "")
+        
+        # 如果没有tool字段但有type字段，进行映射
+        if not tool_name and step_type:
+            type_to_tool = {
+                "buffer": "buffer_filter_tool",
+                "elevation": "elevation_filter_tool",
+                "slope": "slope_filter_tool",
+                "vegetation": "vegetation_filter_tool",
+                "relative_position": "relative_position_filter_tool",
+                "distance": "distance_filter_tool",
+                "area": "area_filter_tool"
+            }
+            tool_name = type_to_tool.get(step_type, "")
+        
         step_params = step_result.get("params", {})
         step_id = step_result.get("step_id", step_result.get("step", ""))
         

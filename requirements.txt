@@ -10,7 +10,8 @@ rasterio>=1.3.0
 pyproj>=3.6.0
 folium>=0.14.0
 pydantic>=2.0.0
-pyvis>=0.3.2
+matplotlib>=3.7.0
+networkx>=3.1.0
 # OpenSPG KAG SDK (需要从GitHub安装: git clone https://github.com/OpenSPG/KAG.git && cd KAG && pip install -e .)
 # openspg-kag>=0.1.0
 

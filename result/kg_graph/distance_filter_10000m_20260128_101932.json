@@ -1,8 +1,0 @@
-{
-  "result_file": "distance_filter_10000m_20260128_101932.geojson",
-  "timestamp": "2026-01-28T10:20:22.703701",
-  "unit": null,
-  "original_query": "我已知一个迫击炮排和一个装甲反坦克排的位置，帮我找基指的位置。迫击炮排坐标： (118.522, 31.515)，装甲反坦克排坐标： (118.552, 31.520)",
-  "retrieved_entities": [],
-  "retrieved_relations": []
-}

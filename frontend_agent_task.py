@@ -301,7 +301,8 @@ def render_agent_task_tab(api_url: str):
                 st.info("任务已完成，显示结果如下：")
                 result_data = st.session_state.get("last_result_data", {})
                 work_result = result_data.get("result", {})
-                plan = st.session_state.current_plan
+                # 优先使用后端返回的updated_plan（包含kg_graph_image_filename）
+                plan = work_result.get("updated_plan", st.session_state.current_plan)
                 
                 if work_result.get("sub_results"):
                     sub_results = work_result.get("sub_results", [])
@@ -555,6 +556,34 @@ def render_agent_task_tab(api_url: str):
                                                         key="second_llm_response_display",
                                                         label_visibility="collapsed"
                                                     )
+                                            
+                                            st.markdown("---")
+                                            
+                                            kg_graph_image_filename = plan.get("kg_graph_image_filename")
+                                            retrieved_entities = plan.get("retrieved_entities", [])
+                                            retrieved_relations = plan.get("retrieved_relations", [])
+                                            
+                                            if kg_graph_image_filename:
+                                                st.subheader("实体关系图")
+                                                try:
+                                                    from urllib.parse import quote
+                                                    encoded_image_filename = quote(kg_graph_image_filename, safe='')
+                                                    image_response = requests.get(
+                                                        f"{api_url}/api/kg-graph-images/{encoded_image_filename}",
+                                                        timeout=30
+                                                    )
+                                                    if image_response.status_code == 200:
+                                                        st.image(image_response.content, caption="实体关系图", use_container_width=True)
+                                                    else:
+                                                        st.warning(f"无法加载图片: {kg_graph_image_filename}")
+                                                except Exception as e:
+                                                    st.warning(f"加载图片失败: {e}")
+                                            elif retrieved_entities or retrieved_relations:
+                                                st.subheader("实体关系图")
+                                                from frontend_entity_relation_graph import display_kag_entities_relations
+                                                display_kag_entities_relations(retrieved_entities, retrieved_relations, show_title=True)
+                                            else:
+                                                st.info("无实体关系图数据")
                             else:
                                 st.error(f"任务执行失败: {result.get('result', {}).get('error', '未知错误')}")
                                 if st.button("重新输入任务", type="primary"):

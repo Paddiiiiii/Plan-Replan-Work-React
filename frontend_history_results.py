@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import os
-from config import HISTORY_DISPLAY_CONFIG
+from config import HISTORY_DISPLAY_CONFIG, PATHS
 from frontend_utils import load_geojson, create_map, parse_regions_from_task, format_filter_params
 
 def render_history_results_tab(api_url: str):
@@ -182,13 +182,11 @@ def render_history_results_tab(api_url: str):
                                             filter_params_list = metadata.get("filter_params", [])
                                             if filter_params_list:
                                                 st.subheader("筛选参数")
-                                                formatted_params_list = format_filter_params(filter_params_list)
-                                                
-                                                for item in formatted_params_list:
-                                                    st.markdown(f"**步骤 {item['step']} - {item['tool_display_name']}**")
-                                                    for key, value in item['params'].items():
+                                                for item in filter_params_list:
+                                                    st.markdown(f"**步骤 {item['step']} - {item.get('tool_display_name', item.get('tool', ''))}**")
+                                                    for key, value in item.get('params', {}).items():
                                                         st.write(f"  • **{key}**: {value}")
-                                                    if item != formatted_params_list[-1]:
+                                                    if item != filter_params_list[-1]:
                                                         st.markdown("---")
                                             else:
                                                 st.subheader("筛选参数")
@@ -238,9 +236,27 @@ def render_history_results_tab(api_url: str):
                                                     )
                                         
                                         if HISTORY_DISPLAY_CONFIG.get("show_kg_graph", True):
+                                            kg_graph_image_filename = metadata.get("kg_graph_image_filename")
                                             retrieved_entities = metadata.get("retrieved_entities", [])
                                             retrieved_relations = metadata.get("retrieved_relations", [])
-                                            if retrieved_entities or retrieved_relations:
+                                            
+                                            if kg_graph_image_filename:
+                                                st.markdown("---")
+                                                st.subheader("实体关系图")
+                                                try:
+                                                    from urllib.parse import quote
+                                                    encoded_image_filename = quote(kg_graph_image_filename, safe='')
+                                                    image_response = requests.get(
+                                                        f"{api_url}/api/kg-graph-images/{encoded_image_filename}",
+                                                        timeout=30
+                                                    )
+                                                    if image_response.status_code == 200:
+                                                        st.image(image_response.content, caption="实体关系图", use_container_width=True)
+                                                    else:
+                                                        st.warning(f"无法加载图片: {kg_graph_image_filename}")
+                                                except Exception as e:
+                                                    st.warning(f"加载图片失败: {e}")
+                                            elif retrieved_entities or retrieved_relations:
                                                 st.markdown("---")
                                                 with st.expander("🔍 KAG检索到的实体和关系", expanded=False):
                                                     from frontend_entity_relation_graph import display_kag_entities_relations
@@ -319,13 +335,11 @@ def render_history_results_tab(api_url: str):
                             filter_params_list = metadata.get("filter_params", [])
                             if filter_params_list:
                                 st.subheader("筛选参数")
-                                formatted_params_list = format_filter_params(filter_params_list)
-                                
-                                for item in formatted_params_list:
-                                    st.markdown(f"**步骤 {item['step']} - {item['tool_display_name']}**")
-                                    for key, value in item['params'].items():
+                                for item in filter_params_list:
+                                    st.markdown(f"**步骤 {item['step']} - {item.get('tool_display_name', item.get('tool', ''))}**")
+                                    for key, value in item.get('params', {}).items():
                                         st.write(f"  • **{key}**: {value}")
-                                    if item != formatted_params_list[-1]:
+                                    if item != filter_params_list[-1]:
                                         st.markdown("---")
                             else:
                                 st.subheader("筛选参数")
@@ -375,9 +389,27 @@ def render_history_results_tab(api_url: str):
                                     )
                         
                         if HISTORY_DISPLAY_CONFIG.get("show_kg_graph", True):
+                            kg_graph_image_filename = metadata.get("kg_graph_image_filename")
                             retrieved_entities = metadata.get("retrieved_entities", [])
                             retrieved_relations = metadata.get("retrieved_relations", [])
-                            if retrieved_entities or retrieved_relations:
+                            
+                            if kg_graph_image_filename:
+                                st.markdown("---")
+                                st.subheader("实体关系图")
+                                try:
+                                    from urllib.parse import quote
+                                    encoded_image_filename = quote(kg_graph_image_filename, safe='')
+                                    image_response = requests.get(
+                                        f"{api_url}/api/kg-graph-images/{encoded_image_filename}",
+                                        timeout=30
+                                    )
+                                    if image_response.status_code == 200:
+                                        st.image(image_response.content, caption="实体关系图", use_container_width=True)
+                                    else:
+                                        st.warning(f"无法加载图片: {kg_graph_image_filename}")
+                                except Exception as e:
+                                    st.warning(f"加载图片失败: {e}")
+                            elif retrieved_entities or retrieved_relations:
                                 st.markdown("---")
                                 with st.expander("🔍 KAG检索到的实体和关系", expanded=False):
                                     from frontend_entity_relation_graph import display_kag_entities_relations

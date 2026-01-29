@@ -105,12 +105,13 @@ class KAGSolverWrapper:
             self._solver = None
             self._initialized = True  # 标记为已初始化，避免重复尝试
     
-    def query(self, question: str) -> Dict:
+    def query(self, question: str, output_file: Optional[str] = None) -> Dict:
         """
         使用推理引擎回答问题（同步版本）
         
         Args:
             question: 用户问题
+            output_file: 输出文件名（用于保存实体关系图），可选
             
         Returns:
             包含答案、任务列表、输入查询和引用的字典
@@ -206,12 +207,78 @@ class KAGSolverWrapper:
             else:
                 answer = str(result) if result else ""
             
+            # 提取并保存实体关系图（从检索结果中提取任务相关的子图谱）
+            kg_data = None
+            if output_file:
+                try:
+                    # 从captured_tasks中提取检索到的实体和关系
+                    formatted_entities = []
+                    formatted_relations = []
+                    seen_entity_ids = set()
+                    seen_relations = set()
+                    
+                    # 遍历所有task，从memory中提取retriever结果
+                    for task in captured_tasks:
+                        task_memory = task.get("memory", {})
+                        if not isinstance(task_memory, dict):
+                            continue
+                        
+                        # 从retriever结果中提取
+                        if "retriever" in task_memory:
+                            retriever_output = task_memory["retriever"]
+                            self._extract_entities_relations_from_retriever_output(
+                                retriever_output, formatted_entities, formatted_relations, 
+                                seen_entity_ids, seen_relations
+                            )
+                        
+                        # 从graph_data中提取
+                        if "graph_data" in task_memory:
+                            graph_data = task_memory["graph_data"]
+                            self._extract_entities_relations_from_graph_data(
+                                graph_data, formatted_entities, formatted_relations,
+                                seen_entity_ids, seen_relations
+                            )
+                        
+                        # 从result中提取
+                        task_result = task.get("result")
+                        if task_result:
+                            self._extract_entities_relations_from_retriever_output(
+                                task_result, formatted_entities, formatted_relations,
+                                seen_entity_ids, seen_relations
+                            )
+                    
+                    kg_data = {
+                        "retrieved_entities": formatted_entities,
+                        "retrieved_relations": formatted_relations,
+                        "entity_count": len(formatted_entities),
+                        "relation_count": len(formatted_relations)
+                    }
+                    
+                    logger.info(f"从检索结果中提取到 {len(formatted_entities)} 个实体, {len(formatted_relations)} 个关系")
+                    
+                    # 保存到文件
+                    import sys
+                    import os
+                    # 获取项目根目录（AIgen）
+                    project_root = self.project_path.parent.parent.parent
+                    kg_graph_dir = project_root / "result" / "kg_graph"
+                    kg_graph_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    kg_file_path = kg_graph_dir / f"{output_file}.json"
+                    with open(kg_file_path, "w", encoding="utf-8") as f:
+                        json.dump(kg_data, f, ensure_ascii=False, indent=2)
+                    
+                    logger.info(f"实体关系图已保存到: {kg_file_path}")
+                except Exception as e:
+                    logger.error(f"提取并保存实体关系图失败: {e}", exc_info=True)
+            
             return {
                 "answer": answer,
                 "input_query": question,
                 "tasks": captured_tasks,
                 "references": result.get("references", []) if isinstance(result, dict) else [],
-                "raw_result": result
+                "raw_result": result,
+                "kg_data": kg_data
             }
         except Exception as e:
             logger.error(f"推理查询失败: {e}", exc_info=True)
@@ -857,4 +924,226 @@ class KAGSolverWrapper:
             logger.debug(f"格式化关系失败: {e}, relation类型: {type(relation)}")
         
         return None
+    
+    def _extract_entities_relations_from_retriever_output(
+        self, 
+        retriever_output: Any, 
+        formatted_entities: List[Dict], 
+        formatted_relations: List[Dict],
+        seen_entity_ids: set,
+        seen_relations: set
+    ):
+        """从retriever输出中提取实体和关系"""
+        if not retriever_output:
+            return
+        
+        try:
+            # 如果是字典
+            if isinstance(retriever_output, dict):
+                # 检查是否有graphs字段
+                graphs = retriever_output.get("graphs", [])
+                if graphs:
+                    for graph in graphs:
+                        self._extract_entities_relations_from_graph_data(
+                            graph, formatted_entities, formatted_relations,
+                            seen_entity_ids, seen_relations
+                        )
+                
+                # 检查是否有graph_data字段
+                graph_data = retriever_output.get("graph_data")
+                if graph_data:
+                    self._extract_entities_relations_from_graph_data(
+                        graph_data, formatted_entities, formatted_relations,
+                        seen_entity_ids, seen_relations
+                    )
+                
+                # 检查是否有resultNodes和resultEdges字段
+                nodes = retriever_output.get("resultNodes", retriever_output.get("nodes", []))
+                edges = retriever_output.get("resultEdges", retriever_output.get("edges", []))
+                
+                for node in nodes:
+                    if isinstance(node, dict):
+                        entity_id = node.get("id") or node.get("name", "")
+                        if entity_id and entity_id not in seen_entity_ids:
+                            seen_entity_ids.add(entity_id)
+                            formatted_entities.append({
+                                "id": entity_id,
+                                "name": node.get("name", entity_id),
+                                "type": node.get("type") or node.get("label", "Unknown"),
+                                "properties": node.get("properties", {})
+                            })
+                
+                for edge in edges:
+                    if isinstance(edge, dict):
+                        source = edge.get("from_id") or edge.get("from") or edge.get("source", "")
+                        target = edge.get("to_id") or edge.get("to") or edge.get("target", "")
+                        relation_type = edge.get("label") or edge.get("type", "Unknown")
+                        
+                        if source and target:
+                            relation_key = f"{source}_{target}_{relation_type}"
+                            if relation_key not in seen_relations:
+                                seen_relations.add(relation_key)
+                                formatted_relations.append({
+                                    "source": source,
+                                    "target": target,
+                                    "type": relation_type,
+                                    "properties": edge.get("properties", {})
+                                })
+            
+            # 如果是对象且有get_all_spo方法
+            elif hasattr(retriever_output, "get_all_spo"):
+                try:
+                    spos = retriever_output.get_all_spo()
+                    for spo in spos:
+                        if hasattr(spo, "s") and hasattr(spo, "o"):
+                            source_entity = spo.s
+                            target_entity = spo.o
+                            relation_type = getattr(spo, "type", "Unknown")
+                            
+                            source_id = getattr(source_entity, "biz_id", getattr(source_entity, "name", ""))
+                            target_id = getattr(target_entity, "biz_id", getattr(target_entity, "name", ""))
+                            
+                            if source_id and source_id not in seen_entity_ids:
+                                seen_entity_ids.add(source_id)
+                                formatted_entities.append({
+                                    "id": source_id,
+                                    "name": getattr(source_entity, "name", source_id),
+                                    "type": getattr(source_entity, "type", "Unknown"),
+                                    "properties": {}
+                                })
+                            
+                            if target_id and target_id not in seen_entity_ids:
+                                seen_entity_ids.add(target_id)
+                                formatted_entities.append({
+                                    "id": target_id,
+                                    "name": getattr(target_entity, "name", target_id),
+                                    "type": getattr(target_entity, "type", "Unknown"),
+                                    "properties": {}
+                                })
+                            
+                            if source_id and target_id:
+                                relation_key = f"{source_id}_{target_id}_{relation_type}"
+                                if relation_key not in seen_relations:
+                                    seen_relations.add(relation_key)
+                                    formatted_relations.append({
+                                        "source": source_id,
+                                        "target": target_id,
+                                        "type": relation_type,
+                                        "properties": {}
+                                    })
+                except Exception as e:
+                    logger.debug(f"从get_all_spo提取失败: {e}")
+            
+            # 如果是对象且有to_dict方法
+            elif hasattr(retriever_output, "to_dict"):
+                try:
+                    output_dict = retriever_output.to_dict()
+                    self._extract_entities_relations_from_retriever_output(
+                        output_dict, formatted_entities, formatted_relations,
+                        seen_entity_ids, seen_relations
+                    )
+                except Exception as e:
+                    logger.debug(f"从to_dict提取失败: {e}")
+        
+        except Exception as e:
+            logger.debug(f"从retriever输出提取实体关系失败: {e}")
+    
+    def _extract_entities_relations_from_graph_data(
+        self,
+        graph_data: Any,
+        formatted_entities: List[Dict],
+        formatted_relations: List[Dict],
+        seen_entity_ids: set,
+        seen_relations: set
+    ):
+        """从graph_data中提取实体和关系"""
+        if not graph_data:
+            return
+        
+        try:
+            # 如果是字典
+            if isinstance(graph_data, dict):
+                nodes = graph_data.get("resultNodes", graph_data.get("nodes", []))
+                edges = graph_data.get("resultEdges", graph_data.get("edges", []))
+                
+                for node in nodes:
+                    if isinstance(node, dict):
+                        entity_id = node.get("id") or node.get("name", "")
+                        if entity_id and entity_id not in seen_entity_ids:
+                            seen_entity_ids.add(entity_id)
+                            formatted_entities.append({
+                                "id": entity_id,
+                                "name": node.get("name", entity_id),
+                                "type": node.get("type") or node.get("label", "Unknown"),
+                                "properties": node.get("properties", {})
+                            })
+                
+                for edge in edges:
+                    if isinstance(edge, dict):
+                        source = edge.get("from_id") or edge.get("from") or edge.get("source", "")
+                        target = edge.get("to_id") or edge.get("to") or edge.get("target", "")
+                        relation_type = edge.get("label") or edge.get("type", "Unknown")
+                        
+                        if source and target:
+                            relation_key = f"{source}_{target}_{relation_type}"
+                            if relation_key not in seen_relations:
+                                seen_relations.add(relation_key)
+                                formatted_relations.append({
+                                    "source": source,
+                                    "target": target,
+                                    "type": relation_type,
+                                    "properties": edge.get("properties", {})
+                                })
+            
+            # 如果是对象且有get_all_entity和get_all_spo方法
+            elif hasattr(graph_data, "get_all_entity") and hasattr(graph_data, "get_all_spo"):
+                try:
+                    entities = graph_data.get_all_entity()
+                    for entity in entities:
+                        entity_id = getattr(entity, "biz_id", getattr(entity, "name", ""))
+                        if entity_id and entity_id not in seen_entity_ids:
+                            seen_entity_ids.add(entity_id)
+                            formatted_entities.append({
+                                "id": entity_id,
+                                "name": getattr(entity, "name", entity_id),
+                                "type": getattr(entity, "type", "Unknown"),
+                                "properties": {}
+                            })
+                    
+                    spos = graph_data.get_all_spo()
+                    for spo in spos:
+                        if hasattr(spo, "s") and hasattr(spo, "o"):
+                            source_entity = spo.s
+                            target_entity = spo.o
+                            relation_type = getattr(spo, "type", "Unknown")
+                            
+                            source_id = getattr(source_entity, "biz_id", getattr(source_entity, "name", ""))
+                            target_id = getattr(target_entity, "biz_id", getattr(target_entity, "name", ""))
+                            
+                            if source_id and target_id:
+                                relation_key = f"{source_id}_{target_id}_{relation_type}"
+                                if relation_key not in seen_relations:
+                                    seen_relations.add(relation_key)
+                                    formatted_relations.append({
+                                        "source": source_id,
+                                        "target": target_id,
+                                        "type": relation_type,
+                                        "properties": {}
+                                    })
+                except Exception as e:
+                    logger.debug(f"从graph_data对象提取失败: {e}")
+            
+            # 如果是对象且有to_dict方法
+            elif hasattr(graph_data, "to_dict"):
+                try:
+                    graph_dict = graph_data.to_dict()
+                    self._extract_entities_relations_from_graph_data(
+                        graph_dict, formatted_entities, formatted_relations,
+                        seen_entity_ids, seen_relations
+                    )
+                except Exception as e:
+                    logger.debug(f"从graph_data.to_dict提取失败: {e}")
+        
+        except Exception as e:
+            logger.debug(f"从graph_data提取实体关系失败: {e}")
 
