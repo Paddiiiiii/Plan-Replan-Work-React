@@ -994,59 +994,82 @@ class WorkAgent:
                     "input_query": kag_result.get("input_query", "")
                 })
             
-            # 优先使用plan中已有的retrieved_entities和retrieved_relations
-            retrieved_entities = plan.get("retrieved_entities", [])
-            retrieved_relations = plan.get("retrieved_relations", [])
+            # 提取与问题相关的子图谱
+            retrieved_entities = []
+            retrieved_relations = []
             
-            logger.info(f"从plan中获取的实体数量: {len(retrieved_entities)}, 关系数量: {len(retrieved_relations)}")
+            # 1. 从原始问题中提取关键词
+            original_query = plan.get("original_query", "")
+            query_keywords = self._extract_keywords_from_query(original_query)
+            logger.info(f"从问题中提取的关键词: {query_keywords}")
             
-            # 如果plan中没有，则从kag_solver的checkpoint中提取实体和关系
-            if not retrieved_entities and not retrieved_relations:
-                logger.info("plan中没有retrieved_entities和retrieved_relations，尝试从kag_solver的checkpoint中提取")
-                try:
-                    kg_data = self.context_manager.kag_solver.get_kg_data()
-                    if kg_data and kg_data.get("entity_count", 0) > 0:
-                        retrieved_entities = kg_data.get("entities", [])
-                        retrieved_relations = kg_data.get("relations", [])
-                        logger.info(f"从kag_solver的checkpoint中提取到 {len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系")
-                    else:
-                        logger.warning("从kag_solver的checkpoint中提取实体和关系失败或结果为空")
-                except Exception as e:
-                    logger.error(f"从kag_solver的checkpoint中提取实体和关系失败: {e}", exc_info=True)
-            
-            # 如果仍然没有，则从kag_results的tasks中提取检索到的实体和关系（向后兼容）
-            if not retrieved_entities and not retrieved_relations:
-                logger.info("仍然没有实体和关系，尝试从kag_results中提取")
-                entity_id_set = set()  # 用于去重
-                relation_key_set = set()  # 用于去重
+            if query_keywords:
+                # 2. 优先从plan中获取实体和关系，然后过滤
+                if plan.get("retrieved_entities") and plan.get("retrieved_relations"):
+                    logger.info("从plan中获取实体和关系，然后过滤")
+                    all_entities = plan.get("retrieved_entities", [])
+                    all_relations = plan.get("retrieved_relations", [])
+                    retrieved_entities, retrieved_relations = self._filter_relevant_subgraph(
+                        all_entities, all_relations, query_keywords
+                    )
                 
-                # 从kag_results的tasks中提取检索到的实体和关系
-                for kag_result in kag_results:
-                    tasks = kag_result.get("tasks", [])
-                    for task in tasks:
-                        # 从task的memory中提取
-                        task_memory = task.get("memory", {})
-                        if isinstance(task_memory, dict):
-                            # 从retriever结果中提取实体和关系
-                            if "retriever" in task_memory:
-                                retriever_output = task_memory["retriever"]
-                                self._extract_entities_relations_from_retriever_output(
-                                    retriever_output, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
-                                )
-                            
-                            # 从graph_data中提取
-                            if "graph_data" in task_memory:
-                                graph_data = task_memory["graph_data"]
-                                self._extract_entities_relations_from_graph_data(
-                                    graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
-                                )
-                        
-                        # 从task的result中提取
-                        task_result = task.get("result")
-                        if task_result:
-                            self._extract_entities_relations_from_retriever_output(
-                                task_result, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set
+                # 3. 如果过滤后没有结果，尝试从kag_solver的checkpoint中提取并过滤
+                if not retrieved_entities and not retrieved_relations:
+                    logger.info("从checkpoint中提取实体和关系，然后过滤")
+                    try:
+                        kg_data = self.context_manager.kag_solver.get_kg_data()
+                        if kg_data and kg_data.get("entity_count", 0) > 0:
+                            all_entities = kg_data.get("entities", [])
+                            all_relations = kg_data.get("relations", [])
+                            retrieved_entities, retrieved_relations = self._filter_relevant_subgraph(
+                                all_entities, all_relations, query_keywords
                             )
+                    except Exception as e:
+                        logger.error(f"从checkpoint中提取实体和关系失败: {e}", exc_info=True)
+                
+                # 4. 如果仍然没有结果，尝试从kag_results中提取并过滤
+                if not retrieved_entities and not retrieved_relations:
+                    logger.info("从kag_results中提取实体和关系，然后过滤")
+                    entity_id_set = set()  # 用于去重
+                    relation_key_set = set()  # 用于去重
+                    
+                    # 从kag_results的tasks中提取检索到的实体和关系
+                    all_entities = []
+                    all_relations = []
+                    for kag_result in kag_results:
+                        tasks = kag_result.get("tasks", [])
+                        for task in tasks:
+                            # 从task的memory中提取
+                            task_memory = task.get("memory", {})
+                            if isinstance(task_memory, dict):
+                                # 从retriever结果中提取实体和关系
+                                if "retriever" in task_memory:
+                                    retriever_output = task_memory["retriever"]
+                                    self._extract_entities_relations_from_retriever_output(
+                                        retriever_output, all_entities, all_relations, entity_id_set, relation_key_set
+                                    )
+                                
+                                # 从graph_data中提取
+                                if "graph_data" in task_memory:
+                                    graph_data = task_memory["graph_data"]
+                                    self._extract_entities_relations_from_graph_data(
+                                        graph_data, all_entities, all_relations, entity_id_set, relation_key_set
+                                    )
+                            
+                            # 从task的result中提取
+                            task_result = task.get("result")
+                            if task_result:
+                                self._extract_entities_relations_from_retriever_output(
+                                    task_result, all_entities, all_relations, entity_id_set, relation_key_set
+                                )
+                    
+                    # 过滤提取的实体和关系
+                    if all_entities and all_relations:
+                        retrieved_entities, retrieved_relations = self._filter_relevant_subgraph(
+                            all_entities, all_relations, query_keywords
+                        )
+            
+            logger.info(f"过滤后的实体数量: {len(retrieved_entities)}, 关系数量: {len(retrieved_relations)}")
             
             # 提取筛选参数信息（从step_results中提取）
             filter_params_list = []
@@ -1361,6 +1384,85 @@ class WorkAgent:
                                                 "type": relation_type,
                                                 "properties": relation.get("properties", {})
                                             })
+    
+    def _extract_keywords_from_query(self, query):
+        """从问题中提取关键词"""
+        import re
+        import jieba
+        
+        # 移除标点符号
+        query = re.sub(r'[，。！？；：“”‘’（）【】]', ' ', query)
+        
+        # 使用jieba分词
+        words = jieba.cut(query)
+        
+        # 过滤停用词和短词
+        stop_words = {'我', '你', '他', '她', '它', '们', '的', '了', '是', '在', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'}
+        keywords = []
+        
+        for word in words:
+            word = word.strip()
+            if word and len(word) > 1 and word not in stop_words:
+                keywords.append(word)
+        
+        # 去重并返回
+        return list(set(keywords))
+    
+    def _filter_relevant_subgraph(self, all_entities, all_relations, query_keywords):
+        """根据关键词过滤相关的子图谱"""
+        relevant_entities = []
+        relevant_relations = []
+        
+        if not all_entities or not query_keywords:
+            return relevant_entities, relevant_relations
+        
+        # 1. 构建实体ID到实体的映射
+        entity_map = {entity.get("id"): entity for entity in all_entities}
+        
+        # 2. 找出与关键词直接相关的实体（核心实体）
+        core_entity_ids = set()
+        for entity_id, entity in entity_map.items():
+            entity_name = entity.get("name", "").lower()
+            entity_type = entity.get("type", "").lower()
+            
+            # 检查实体名称或类型是否包含关键词
+            for keyword in query_keywords:
+                keyword_lower = keyword.lower()
+                if keyword_lower in entity_name or keyword_lower in entity_type:
+                    core_entity_ids.add(entity_id)
+                    break
+        
+        # 3. 找出与核心实体直接相连的关系
+        related_relation_keys = set()
+        for relation in all_relations:
+            source = relation.get("source")
+            target = relation.get("target")
+            
+            # 如果关系的源或目标是核心实体，则保留该关系
+            if source in core_entity_ids or target in core_entity_ids:
+                # 生成关系键以去重
+                relation_key = f"{source}->{target}->{relation.get('type', '')}"
+                if relation_key not in related_relation_keys:
+                    related_relation_keys.add(relation_key)
+                    relevant_relations.append(relation)
+        
+        # 4. 找出与核心实体直接相连的其他实体（扩展实体）
+        extended_entity_ids = set(core_entity_ids)
+        for relation in relevant_relations:
+            source = relation.get("source")
+            target = relation.get("target")
+            
+            if source in entity_map:
+                extended_entity_ids.add(source)
+            if target in entity_map:
+                extended_entity_ids.add(target)
+        
+        # 5. 收集所有相关实体（核心实体 + 直接相连的实体）
+        for entity_id in extended_entity_ids:
+            if entity_id in entity_map:
+                relevant_entities.append(entity_map[entity_id])
+        
+        return relevant_entities, relevant_relations
     
     def _extract_entities_relations_from_graph_data(self, graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
         """从graph_data中提取实体和关系"""

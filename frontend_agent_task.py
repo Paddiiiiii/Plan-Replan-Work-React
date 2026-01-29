@@ -166,7 +166,7 @@ def render_agent_task_tab(api_url: str):
     if "current_stage" not in st.session_state:
         st.session_state.current_stage = "input"
     if "task_input" not in st.session_state:
-        st.session_state.task_input = "我已知一个迫击炮排和一个装甲反坦克排的位置，帮我找基指的位置。迫击炮排坐标： (118.522, 31.515)，装甲反坦克排坐标： (118.552, 31.520)"
+        st.session_state.task_input = "我已知一个迫击炮排和一个装甲反坦克排的位置，帮我找基指的位置。迫击炮排坐标： (118.519, 31.515)，装甲反坦克排坐标： (118.560, 31.520)"
     if "regions" not in st.session_state:
         st.session_state.regions = [
             {
