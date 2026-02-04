@@ -1211,9 +1211,10 @@ class WorkAgent:
                     
                     matplotlib.use('Agg')
                     
-                    fig, ax = plt.subplots(figsize=(14, 10))
-                    ax.set_facecolor('#f5f5f5')
+                    fig, ax = plt.subplots(figsize=(16, 12))
+                    ax.set_facecolor('#f8f9fa')
                     
+                    # 扩展实体类型颜色映射
                     entity_type_colors = {
                         "MilitaryUnit": "#FF6B6B",
                         "TerrainFeature": "#4ECDC4",
@@ -1228,7 +1229,17 @@ class WorkAgent:
                         "KillZone": "#A8DADC",
                         "ObstacleBelt": "#457B9D",
                         "SupportPoint": "#E63946",
-                        "ApproachRoute": "#F1FAEE"
+                        "ApproachRoute": "#F1FAEE",
+                        "Person": "#FF9F1C",
+                        "Organization": "#2EC4B6",
+                        "Equipment": "#E76F51",
+                        "Location": "#8338EC",
+                        "Event": "#3A86FF",
+                        "Concept": "#FB5607",
+                        "Object": "#8AC926",
+                        "Action": "#118AB2",
+                        "Attribute": "#073B4C",
+                        "Unknown": "#6C757D"
                     }
                     
                     G = nx.DiGraph()
@@ -1238,12 +1249,23 @@ class WorkAgent:
                         entity_id = entity.get("id", "")
                         entity_name = entity.get("name", entity_id)
                         entity_type = entity.get("type", "Unknown")
-                        color = entity_type_colors.get(entity_type, "#888888")
+                        
+                        # 标准化实体类型名称（去除空格，转换为驼峰命名）
+                        normalized_type = entity_type.strip()
+                        
+                        # 尝试获取颜色，如果没有匹配的类型，使用基于类型名称的哈希颜色
+                        if normalized_type in entity_type_colors:
+                            color = entity_type_colors[normalized_type]
+                        else:
+                            # 基于类型名称生成一致的颜色
+                            import hashlib
+                            hash_val = hashlib.md5(normalized_type.encode()).hexdigest()[:6]
+                            color = f"#{hash_val}"
                         
                         G.add_node(
                             entity_id,
                             label=entity_name,
-                            type=entity_type,
+                            type=normalized_type,
                             color=color
                         )
                         entity_map[entity_id] = entity
@@ -1261,51 +1283,133 @@ class WorkAgent:
                             )
                     
                     if len(G.nodes()) > 0:
-                        pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
+                        # 根据节点数量选择布局算法，优先保证节点不重叠
+                        import numpy as np
                         
-                        node_colors = [G.nodes[node].get('color', '#888888') for node in G.nodes()]
-                        node_labels = {node: G.nodes[node].get('label', node)[:15] for node in G.nodes()}
+                        if len(G.nodes()) <= 10:
+                            # 对于小型图，使用circular_layout（环形布局，节点间距均匀）
+                            pos = nx.circular_layout(G, scale=2)
+                        elif len(G.nodes()) <= 20:
+                            # 对于中型图，使用shell_layout（分层布局）
+                            # 计算层数
+                            n = len(G.nodes())
+                            layers = [list(G.nodes())[:n//2], list(G.nodes())[n//2:]]
+                            pos = nx.shell_layout(G, nlist=layers, scale=2)
+                        else:
+                            # 对于大型图，使用spring_layout并大幅增加排斥力
+                            pos = nx.spring_layout(G, k=2.0, iterations=300, scale=3, center=(0, 0))
                         
+                        # 后处理：强制分离节点，确保最小距离
+                        min_dist = 0.25  # 增加最小距离
+                        nodes = list(G.nodes())
+                        
+                        # 多次迭代调整，确保所有节点都分开
+                        for iteration in range(10):  # 最多迭代10次
+                            moved = False
+                            for i in range(len(nodes)):
+                                for j in range(i + 1, len(nodes)):
+                                    pos_i = np.array(pos[nodes[i]])
+                                    pos_j = np.array(pos[nodes[j]])
+                                    dist = np.linalg.norm(pos_i - pos_j)
+                                    
+                                    if dist < min_dist:
+                                        # 计算需要移动的距离
+                                        direction = pos_j - pos_i
+                                        if np.linalg.norm(direction) > 0:
+                                            direction = direction / np.linalg.norm(direction)
+                                        else:
+                                            # 随机方向
+                                            direction = np.random.randn(2)
+                                            direction = direction / np.linalg.norm(direction)
+                                        
+                                        # 计算需要移动的距离，稍微超过最小距离以确保分开
+                                        move_dist = (min_dist - dist) / 2 + 0.02
+                                        
+                                        # 移动两个节点
+                                        pos[nodes[i]] = pos_i - direction * move_dist
+                                        pos[nodes[j]] = pos_j + direction * move_dist
+                                        moved = True
+                            
+                            # 如果没有节点需要移动，提前结束
+                            if not moved:
+                                break
+                        
+                        # 最后调整：确保所有节点都在画布范围内
+                        all_pos = np.array([pos[node] for node in G.nodes()])
+                        min_pos = np.min(all_pos, axis=0)
+                        max_pos = np.max(all_pos, axis=0)
+                        
+                        # 计算缩放因子，确保所有节点都在合理范围内
+                        current_range = max(max_pos[0] - min_pos[0], max_pos[1] - min_pos[1])
+                        if current_range > 4:
+                            scale_factor = 4 / current_range
+                            for node in G.nodes():
+                                pos[node] = pos[node] * scale_factor
+                        
+                        node_colors = [G.nodes[node].get('color', '#6C757D') for node in G.nodes()]
+                        node_labels = {node: G.nodes[node].get('label', node)[:20] for node in G.nodes()}
+                        
+                        # 绘制节点
                         nx.draw_networkx_nodes(
                             G, pos,
                             node_color=node_colors,
-                            node_size=2000,
-                            alpha=0.9,
-                            edgecolors='white',
+                            node_size=2200,
+                            alpha=0.95,
+                            edgecolors='#ffffff',
                             linewidths=2,
                             ax=ax
                         )
                         
+                        # 绘制边
                         nx.draw_networkx_edges(
                             G, pos,
-                            edge_color='#666666',
-                            width=2,
-                            alpha=0.6,
-                            arrowsize=20,
+                            edge_color='#495057',
+                            width=2.5,
+                            alpha=0.8,
+                            arrowsize=25,
                             arrowstyle='->',
+                            connectionstyle='arc3,rad=0.1',
                             ax=ax
                         )
                         
+                        # 绘制节点标签
                         nx.draw_networkx_labels(
                             G, pos,
                             labels=node_labels,
-                            font_size=10,
+                            font_size=11,
                             font_weight='bold',
                             font_family='Microsoft YaHei',
                             ax=ax
                         )
                         
+                        # 绘制边标签
                         edge_labels = nx.get_edge_attributes(G, 'label')
                         nx.draw_networkx_edge_labels(
                             G, pos,
                             edge_labels=edge_labels,
-                            font_size=8,
+                            font_size=9,
+                            font_color='#212529',
                             font_family='Microsoft YaHei',
+                            bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', boxstyle='round,pad=0.3'),
                             ax=ax
                         )
                         
+                        # 添加图例
+                        unique_types = set(G.nodes[node].get('type', 'Unknown') for node in G.nodes())
+                        legend_elements = []
+                        for entity_type in unique_types:
+                            color = entity_type_colors.get(entity_type, '#6C757D')
+                            legend_elements.append(
+                                plt.Line2D([0], [0], marker='o', color='w', label=entity_type, 
+                                          markerfacecolor=color, markersize=10, markeredgewidth=2, markeredgecolor='white')
+                            )
+                        
+                        if legend_elements:
+                            ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.25, 1), 
+                                     title="实体类型", fontsize=9, title_fontsize=10)
+                        
                         ax.set_title(f'实体关系图 ({len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系)', 
-                                   fontsize=16, fontweight='bold', pad=20)
+                                   fontsize=18, fontweight='bold', pad=20, fontfamily='Microsoft YaHei')
                         ax.axis('off')
                         
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1315,8 +1419,8 @@ class WorkAgent:
                         kg_graph_images_dir.mkdir(parents=True, exist_ok=True)
                         kg_graph_image_path = kg_graph_images_dir / kg_graph_image_filename
                         
-                        plt.tight_layout()
-                        plt.savefig(kg_graph_image_path, dpi=150, bbox_inches='tight', facecolor='white')
+                        plt.tight_layout(rect=[0, 0, 0.8, 1])
+                        plt.savefig(kg_graph_image_path, dpi=180, bbox_inches='tight', facecolor='white')
                         plt.close(fig)
                         
                         logger.info(f"已保存实体关系图: {kg_graph_image_path}")
@@ -1425,10 +1529,17 @@ class WorkAgent:
             entity_name = entity.get("name", "").lower()
             entity_type = entity.get("type", "").lower()
             
-            # 检查实体名称或类型是否包含关键词
+            # 检查实体名称或类型是否与关键词精确匹配
             for keyword in query_keywords:
                 keyword_lower = keyword.lower()
-                if keyword_lower in entity_name or keyword_lower in entity_type:
+                
+                # 更精确的匹配逻辑：
+                # 1. 完全匹配实体名称
+                # 2. 实体名称是关键词的精确子词（不是子字符串）
+                # 3. 完全匹配实体类型
+                if (entity_name == keyword_lower or 
+                    self._is_exact_subword(entity_name, keyword_lower) or 
+                    entity_type == keyword_lower):
                     core_entity_ids.add(entity_id)
                     break
         
@@ -1463,6 +1574,15 @@ class WorkAgent:
                 relevant_entities.append(entity_map[entity_id])
         
         return relevant_entities, relevant_relations
+    
+    def _is_exact_subword(self, text, keyword):
+        """检查keyword是否是text的精确子词（不是子字符串）"""
+        import re
+        
+        # 边界匹配：关键词前后是词边界或标点符号
+        # 例如："坦克" 是 "主战坦克" 的子词，但不是 "反坦克炮" 的子词
+        pattern = r'(^|\W)' + re.escape(keyword) + r'(\W|$)'
+        return bool(re.search(pattern, text))
     
     def _extract_entities_relations_from_graph_data(self, graph_data, retrieved_entities, retrieved_relations, entity_id_set, relation_key_set):
         """从graph_data中提取实体和关系"""

@@ -194,10 +194,10 @@ def render_history_results_tab(api_url: str):
                                         
                                         if HISTORY_DISPLAY_CONFIG.get("show_llm_thinking", True):
                                             st.markdown("---")
-                                            with st.expander("📋 KAG问答结果与LLM思考过程", expanded=True):
+                                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=True):
                                                 kag_qa_results = metadata.get("kag_qa_results", [])
                                                 if kag_qa_results:
-                                                    st.subheader("KAG知识召回结果")
+                                                    st.subheader("知识抽取知识召回结果")
                                                     st.write(f"共{len(kag_qa_results)}个问题：")
                                                     for i, qa_result in enumerate(kag_qa_results, 1):
                                                         question = qa_result.get("question", "")
@@ -207,14 +207,14 @@ def render_history_results_tab(api_url: str):
                                                         st.markdown("---")
                                                 
                                                 if metadata.get("first_llm_response"):
-                                                    st.subheader("第一轮LLM思考（工具选择和参数提取）")
+                                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
                                                     first_response = metadata.get("first_llm_response", "")
                                                     MAX_RESPONSE_LENGTH = 50000
                                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ LLM响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第一轮LLM响应",
+                                                        "第一轮大模型响应",
                                                         value=first_response,
                                                         height=200,
                                                         key=f"first_llm_response_history_{selected_filename}",
@@ -222,13 +222,13 @@ def render_history_results_tab(api_url: str):
                                                     )
                                                 
                                                 if metadata.get("second_llm_response"):
-                                                    st.subheader("第二轮LLM思考（工具调用计划编织）")
+                                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
                                                     second_response = metadata.get("second_llm_response", "")
                                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ LLM响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第二轮LLM响应",
+                                                        "第二轮大模型响应",
                                                         value=second_response,
                                                         height=200,
                                                         key=f"second_llm_response_history_{selected_filename}",
@@ -258,7 +258,7 @@ def render_history_results_tab(api_url: str):
                                                     st.warning(f"加载图片失败: {e}")
                                             elif retrieved_entities or retrieved_relations:
                                                 st.markdown("---")
-                                                with st.expander("🔍 KAG检索到的实体和关系", expanded=False):
+                                                with st.expander("🔍 知识抽取检索到的实体和关系", expanded=False):
                                                     from frontend_entity_relation_graph import display_kag_entities_relations
                                                     display_kag_entities_relations(retrieved_entities, retrieved_relations)
                                     else:
@@ -347,10 +347,10 @@ def render_history_results_tab(api_url: str):
                         
                         if HISTORY_DISPLAY_CONFIG.get("show_llm_thinking", True):
                             st.markdown("---")
-                            with st.expander("📋 KAG问答结果与LLM思考过程", expanded=True):
+                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=True):
                                 kag_qa_results = metadata.get("kag_qa_results", [])
                                 if kag_qa_results:
-                                    st.subheader("KAG知识召回结果")
+                                    st.subheader("知识抽取知识召回结果")
                                     st.write(f"共{len(kag_qa_results)}个问题：")
                                     for i, qa_result in enumerate(kag_qa_results, 1):
                                         question = qa_result.get("question", "")
@@ -360,14 +360,14 @@ def render_history_results_tab(api_url: str):
                                         st.markdown("---")
                                 
                                 if metadata.get("first_llm_response"):
-                                    st.subheader("第一轮LLM思考（工具选择和参数提取）")
+                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
                                     first_response = metadata.get("first_llm_response", "")
                                     MAX_RESPONSE_LENGTH = 50000
                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ LLM响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第一轮LLM响应",
+                                        "第一轮大模型响应",
                                         value=first_response,
                                         height=200,
                                         key=f"first_llm_response_history_{selected_filename}",
@@ -375,13 +375,13 @@ def render_history_results_tab(api_url: str):
                                     )
                                 
                                 if metadata.get("second_llm_response"):
-                                    st.subheader("第二轮LLM思考（工具调用计划编织）")
+                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
                                     second_response = metadata.get("second_llm_response", "")
                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ LLM响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第二轮LLM响应",
+                                        "第二轮大模型响应",
                                         value=second_response,
                                         height=200,
                                         key=f"second_llm_response_history_{selected_filename}",
@@ -411,7 +411,7 @@ def render_history_results_tab(api_url: str):
                                     st.warning(f"加载图片失败: {e}")
                             elif retrieved_entities or retrieved_relations:
                                 st.markdown("---")
-                                with st.expander("🔍 KAG检索到的实体和关系", expanded=False):
+                                with st.expander("🔍 知识抽取检索到的实体和关系", expanded=False):
                                     from frontend_entity_relation_graph import display_kag_entities_relations
                                     display_kag_entities_relations(retrieved_entities, retrieved_relations)
         else:

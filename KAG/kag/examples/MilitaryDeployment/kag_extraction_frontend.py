@@ -1019,7 +1019,7 @@ def main():
             st.markdown("---")
             st.markdown("""
             <div class="fade-in" style="margin: 2rem 0;">
-                <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
+                <h2 style="color: #ffffff; text-align: center; font-weight: 700; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">
                     🎨 知识图谱可视化
                 </h2>
                 <p style="text-align: center; color: rgba(255, 255, 255, 0.9); margin-top: -0.5rem;">
@@ -1037,7 +1037,7 @@ def main():
                     
                     # 创建网络图 - 使用深色背景以突出彩色节点
                     net = Network(
-                        height="600px",
+                        height="2400px",
                         width="100%",
                         bgcolor="#1a1a2e",  # 深蓝黑色背景
                         font_color="white",
@@ -1148,15 +1148,15 @@ def main():
                       "physics": {
                         "enabled": true,
                         "barnesHut": {
-                          "gravitationalConstant": -2000,
-                          "centralGravity": 0.1,
-                          "springLength": 200,
-                          "springConstant": 0.04,
+                          "gravitationalConstant": -10000,
+                          "centralGravity": 0.01,
+                          "springLength": 400,
+                          "springConstant": 0.02,
                           "damping": 0.09
                         },
                         "stabilization": {
                           "enabled": true,
-                          "iterations": 200,
+                          "iterations": 300,
                           "updateInterval": 25,
                           "onlyDynamicEdges": false,
                           "fit": true
@@ -1192,7 +1192,7 @@ def main():
                             html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
                         
                         # 在Streamlit中显示
-                        st.components.v1.html(html_content, height=650, scrolling=False)
+                        st.components.v1.html(html_content, height=2450, scrolling=False)
                     finally:
                         try:
                             os.unlink(html_path)
@@ -1440,7 +1440,7 @@ def main():
             st.markdown("---")
             st.markdown("""
             <div class="fade-in" style="margin: 2rem 0;">
-                <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
+                <h2 style="color: #ffffff; text-align: center; font-weight: 700; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">
                     🎨 知识图谱可视化
                 </h2>
             </div>
@@ -1455,7 +1455,7 @@ def main():
                     
                     # 创建网络图 - 使用深色背景以突出彩色节点
                     net = Network(
-                        height="600px",
+                        height="2400px",
                         width="100%",
                         bgcolor="#1a1a2e",  # 深蓝黑色背景，更炫酷
                         font_color="white",
@@ -1604,15 +1604,15 @@ def main():
                       "physics": {
                         "enabled": true,
                         "barnesHut": {
-                          "gravitationalConstant": -2000,
-                          "centralGravity": 0.1,
-                          "springLength": 200,
-                          "springConstant": 0.04,
+                          "gravitationalConstant": -10000,
+                          "centralGravity": 0.01,
+                          "springLength": 400,
+                          "springConstant": 0.02,
                           "damping": 0.09
                         },
                         "stabilization": {
                           "enabled": true,
-                          "iterations": 200,
+                          "iterations": 300,
                           "updateInterval": 25,
                           "onlyDynamicEdges": false,
                           "fit": true
@@ -1651,7 +1651,7 @@ def main():
                             html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
                         
                         # 在Streamlit中显示
-                        st.components.v1.html(html_content, height=650, scrolling=False)
+                        st.components.v1.html(html_content, height=2450, scrolling=False)
                     finally:
                         # 清理临时文件
                         try:

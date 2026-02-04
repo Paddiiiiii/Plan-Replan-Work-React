@@ -5,8 +5,8 @@ import time
 API_TIMEOUT = 1800
 
 def render_kag_reasoning_tab(api_url: str):
-    """渲染KAG推理标签页"""
-    st.header("🧠 KAG 知识推理")
+    """渲染知识抽取推理标签页"""
+    st.header("🧠 知识抽取 知识推理")
     st.markdown("输入您的问题，系统将基于知识图谱进行推理并返回答案及溯源信息。")
     
     if "kag_query_history" not in st.session_state:
@@ -75,7 +75,7 @@ def render_kag_reasoning_tab(api_url: str):
             if source_texts:
                 st.markdown("---")
                 st.subheader("📄 检索原文")
-                st.markdown("以下是KAG检索到的原始文档片段，用于生成答案：")
+                st.markdown("以下是知识抽取检索到的原始文档片段，用于生成答案：")
                 for idx, source in enumerate(source_texts, 1):
                     source_text = source.get("text", str(source))
                     source_metadata = source.get("metadata", {})
@@ -94,7 +94,7 @@ def render_kag_reasoning_tab(api_url: str):
                             st.markdown("**元数据：**")
                             st.json(source_metadata)
             else:
-                st.info("未获取到检索原文（可能KAG未返回检索结果）")
+                st.info("未获取到检索原文（可能知识抽取未返回检索结果）")
             
             references = result.get("references", [])
             if references:

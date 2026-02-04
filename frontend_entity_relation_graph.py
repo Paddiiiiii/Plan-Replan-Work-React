@@ -3,7 +3,7 @@ import requests
 from typing import List, Dict
 
 def display_kag_entities_relations(entities: List[Dict], relations: List[Dict], show_title: bool = True):
-    """显示KAG检索到的实体和关系图（生成静态图片）"""
+    """显示知识抽取检索到的实体和关系图（生成静态图片）"""
     if not entities and not relations:
         return
     
@@ -11,7 +11,7 @@ def display_kag_entities_relations(entities: List[Dict], relations: List[Dict], 
     total_relations = len(relations)
     
     if show_title:
-        st.subheader("🔍 KAG检索到的实体和关系")
+        st.subheader("🔍 知识抽取检索到的实体和关系")
         st.write(f"检索到 {total_entities} 个实体, {total_relations} 个关系")
     
     try:

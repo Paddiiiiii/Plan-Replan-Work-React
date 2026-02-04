@@ -40,7 +40,7 @@ def main():
     
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["智能体任务", "历史结果", "实体-关系图", "KAG推理"])
+    tab1, tab2, tab3, tab4 = st.tabs(["智能体任务", "历史结果", "实体-关系图", "知识抽取推理"])
 
     with tab1:
         render_agent_task_tab(API_URL)
