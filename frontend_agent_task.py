@@ -374,7 +374,7 @@ def render_agent_task_tab(api_url: str):
                                 st.info("无筛选参数信息")
                             
                             st.markdown("---")
-                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=False):
+                            with st.expander("📋 知识抽取问答结果与智能体思考过程", expanded=False):
                                 if plan and plan.get("kag_results"):
                                     st.subheader("知识抽取知识召回结果")
                                     kag_results = plan.get("kag_results", [])
@@ -387,14 +387,14 @@ def render_agent_task_tab(api_url: str):
                                         st.markdown("---")
                                 
                                 if plan and plan.get("first_llm_response"):
-                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
+                                    st.subheader("第一轮智能体思考（工具选择和参数提取）")
                                     first_response = plan.get("first_llm_response", "")
                                     MAX_RESPONSE_LENGTH = 50000
                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 智能体响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第一轮大模型响应",
+                                        "第一轮智能体响应",
                                         value=first_response,
                                         height=200,
                                         key="first_llm_response_display_cached",
@@ -402,13 +402,13 @@ def render_agent_task_tab(api_url: str):
                                     )
                                 
                                 if plan and plan.get("second_llm_response"):
-                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
+                                    st.subheader("第二轮智能体思考（工具调用计划编织）")
                                     second_response = plan.get("second_llm_response", "")
                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 智能体响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第二轮大模型响应",
+                                        "第二轮智能体响应",
                                         value=second_response,
                                         height=200,
                                         key="second_llm_response_display_cached",
@@ -516,7 +516,7 @@ def render_agent_task_tab(api_url: str):
                                                 st.info("无筛选参数信息")
                                             
                                             st.markdown("---")
-                                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=False):
+                                            with st.expander("📋 知识抽取问答结果与智能体思考过程", expanded=False):
                                                 if plan and plan.get("kag_results"):
                                                     st.subheader("知识抽取知识召回结果")
                                                     kag_results = plan.get("kag_results", [])
@@ -529,14 +529,14 @@ def render_agent_task_tab(api_url: str):
                                                         st.markdown("---")
                                                 
                                                 if plan and plan.get("first_llm_response"):
-                                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
+                                                    st.subheader("第一轮智能体思考（工具选择和参数提取）")
                                                     first_response = plan.get("first_llm_response", "")
                                                     MAX_RESPONSE_LENGTH = 50000
                                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 智能体响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第一轮大模型响应",
+                                                        "第一轮智能体响应",
                                                         value=first_response,
                                                         height=200,
                                                         key="first_llm_response_display",
@@ -544,13 +544,13 @@ def render_agent_task_tab(api_url: str):
                                                     )
                                                 
                                                 if plan and plan.get("second_llm_response"):
-                                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
+                                                    st.subheader("第二轮智能体思考（工具调用计划编织）")
                                                     second_response = plan.get("second_llm_response", "")
                                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 智能体响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第二轮大模型响应",
+                                                        "第二轮智能体响应",
                                                         value=second_response,
                                                         height=200,
                                                         key="second_llm_response_display",

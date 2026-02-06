@@ -795,6 +795,348 @@ def generate_main_kb_visualization(subgraph: SubGraph, output_path: Path) -> Opt
     return None
 
 
+def create_fixed_manual_graph() -> SubGraph:
+    """
+    创建固定的"美军作战手册"图谱结构
+    
+    Returns:
+        SubGraph对象，包含中心实体、第一跳实体和第二跳实体
+    """
+    nodes = []
+    edges = []
+    
+    # 中心实体
+    center_node = Node(
+        _id="美军作战手册",
+        name="美军作战手册",
+        label="手册",
+        properties={}
+    )
+    nodes.append(center_node)
+    
+    # 第一跳实体及其第二跳实体
+    first_level_entities = {
+        "第一章美军作战思想": [
+            "第一节联合军种作战与联军作战",
+            "第二节力量投送",
+            "第三节非战争军事行动",
+            "第四节陆军作战思想与作战原则",
+            "第五节海军作战思想与作战原则",
+            "第六节空军作战思想与作战原则"
+        ],
+        "第二章战区战役": [
+            "第一节概述",
+            "第二节战区战役",
+            "第三节海军与海军陆战队的运用",
+            "第四节空军的运用"
+        ],
+        "第三章空中战役": [
+            "第一节概述",
+            "第二节空中战役的目的、任务和分类",
+            "第三节空中战役的兵力编成与区分",
+            "第四节空中战役的指挥与协同",
+            "第五节空中战役的实施",
+            "第六节空中战役的保障"
+        ],
+        "第四章陆军集团军群作战": [
+            "第一节概述",
+            "第二节使命与任务",
+            "第三节作战计划的制定",
+            "第四节作战地带与兵力部署",
+            "第五节战役机动方案",
+            "第六节火力支援",
+            "第七节战役指挥",
+            "第八节攻防作战的实施"
+        ],
+        "第五章陆军军作战": [
+            "第一节概述",
+            "第二节进攻作战",
+            "第三节防御作战"
+        ],
+        "第六章陆军师战斗": [
+            "第一节概述",
+            "第二节进攻战斗",
+            "第三节防御战斗"
+        ],
+        "第七章机械化步兵与坦克营攻防战斗": [
+            "第一节概述",
+            "第二节进攻战斗",
+            "第三节防御战斗"
+        ],
+        "第八章机步排攻防战斗": [
+            "第一节概述",
+            "第二节进攻战斗",
+            "第三节防御战斗"
+        ]
+    }
+    
+    # 创建第一跳实体并连接到中心实体
+    for first_level_name, second_level_list in first_level_entities.items():
+        first_node = Node(
+            _id=first_level_name,
+            name=first_level_name,
+            label="章节",
+            properties={}
+        )
+        nodes.append(first_node)
+        
+        # 连接到中心实体
+        edge = Edge(
+            _id=f"{center_node.id}_to_{first_level_name}",
+            from_node=center_node,
+            to_node=first_node,
+            label="包含",
+            properties={}
+        )
+        edges.append(edge)
+        
+        # 创建第二跳实体并连接到第一跳实体
+        for second_level_name in second_level_list:
+            # 注意：第二跳可能重名，但不是同一个实体点
+            # 用“父章节+分隔符+小节名”生成唯一 ID，避免图上节点合并/多父连接
+            second_unique_id = f"{first_level_name}::{second_level_name}"
+            second_node = Node(
+                _id=second_unique_id,
+                name=second_level_name,
+                label="小节",
+                properties={
+                    "chapter": first_level_name,
+                    "section": second_level_name,
+                }
+            )
+            nodes.append(second_node)
+            
+            # 连接到第一跳实体
+            edge = Edge(
+                _id=f"{first_level_name}_to_{second_unique_id}",
+                from_node=first_node,
+                to_node=second_node,
+                label="包含",
+                properties={}
+            )
+            edges.append(edge)
+    
+    return SubGraph(nodes=nodes, edges=edges)
+
+
+def render_graph_visualization(
+    subgraph: SubGraph,
+    node_color_map: Optional[Dict[str, str]] = None,
+    edge_color_map: Optional[Dict[str, str]] = None,
+    enable_click_handler: bool = False,
+    target_node_id: Optional[str] = None
+) -> str:
+    """
+    通用的图谱可视化函数，用于渲染固定图谱和知识库图谱
+    
+    Args:
+        subgraph: 要可视化的SubGraph对象
+        node_color_map: 节点ID到颜色的映射（可选）
+        edge_color_map: 关系类型到颜色的映射（可选）
+        enable_click_handler: 是否启用点击事件处理（用于固定图谱）
+        target_node_id: 目标节点ID（用于触发动画的节点）
+        
+    Returns:
+        生成的HTML内容字符串
+    """
+    from pyvis.network import Network
+    import tempfile
+    import os
+    
+    # 创建网络图
+    net = Network(
+        height="2400px",
+        width="100%",
+        bgcolor="#1a1a2e",
+        font_color="white",
+        directed=True
+    )
+    
+    # 默认关系类型配色方案
+    default_relation_colors = {
+        "位于": "#FF6B9D", "包含": "#4ECDC4", "相邻": "#95E1D3", "连接": "#FECA57",
+        "控制": "#48DBFB", "支持": "#FF9FF3", "攻击": "#54A0FF", "防御": "#5F27CD",
+        "部署": "#00D2D3", "指挥": "#FF6348", "隶属": "#FFA502", "协同": "#A55EEA",
+        "依赖": "#26DE81", "影响": "#FD79A8", "关联": "#FDCB6E", "组成": "#6C5CE7",
+        "属于": "#00B894", "执行": "#E17055", "负责": "#74B9FF", "监控": "#A29BFE",
+    }
+    
+    # 使用提供的edge_color_map或默认颜色
+    # 收集所有关系类型
+    all_relation_types = sorted(set([str(e.label) for e in subgraph.edges if e.label]))
+    
+    if edge_color_map is None:
+        # 如果没有提供edge_color_map，为所有关系类型自动分配颜色
+        edge_color_map = {}
+        default_colors = [
+            "#FF6B9D", "#4ECDC4", "#95E1D3", "#FECA57", "#48DBFB",
+            "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF6348",
+            "#FFA502", "#A55EEA", "#26DE81", "#FD79A8", "#FDCB6E",
+            "#6C5CE7", "#00B894", "#E17055", "#74B9FF", "#A29BFE",
+        ]
+        for idx, rel_type in enumerate(all_relation_types):
+            edge_color_map[rel_type] = default_relation_colors.get(rel_type, default_colors[idx % len(default_colors)])
+    else:
+        # 如果提供了edge_color_map，确保所有关系类型都有颜色（补充缺失的关系类型）
+        default_colors = [
+            "#FF6B9D", "#4ECDC4", "#95E1D3", "#FECA57", "#48DBFB",
+            "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF6348",
+            "#FFA502", "#A55EEA", "#26DE81", "#FD79A8", "#FDCB6E",
+            "#6C5CE7", "#00B894", "#E17055", "#74B9FF", "#A29BFE",
+        ]
+        # 为不在edge_color_map中的关系类型分配颜色
+        existing_colors = list(edge_color_map.values())
+        color_index = 0
+        for rel_type in all_relation_types:
+            if rel_type not in edge_color_map:
+                # 优先使用default_relation_colors中的颜色
+                if rel_type in default_relation_colors:
+                    edge_color_map[rel_type] = default_relation_colors[rel_type]
+                else:
+                    # 使用default_colors循环分配
+                    edge_color_map[rel_type] = default_colors[color_index % len(default_colors)]
+                    color_index += 1
+    
+    # 统计每个节点参与的关系类型（用于确定节点颜色）
+    # 即使提供了node_color_map，也需要统计关系类型，以便为不在map中的节点自动着色
+    node_relation_counts = {}
+    for edge in subgraph.edges:
+        source = str(edge.from_id)
+        target = str(edge.to_id)
+        relation_type = str(edge.label) if edge.label else "Unknown"
+        
+        if source not in node_relation_counts:
+            node_relation_counts[source] = {}
+        if target not in node_relation_counts:
+            node_relation_counts[target] = {}
+        
+        node_relation_counts[source][relation_type] = node_relation_counts[source].get(relation_type, 0) + 1
+        node_relation_counts[target][relation_type] = node_relation_counts[target].get(relation_type, 0) + 1
+    
+    # 添加节点
+    entity_map = {}
+    for node in subgraph.nodes:
+        entity_id = str(node.id)
+        entity_name = str(node.name) if node.name else entity_id
+        entity_type = str(node.label) if node.label else "Unknown"
+        
+        # 确定节点颜色
+        # 优先级：1. node_color_map中指定的颜色 2. 根据关系类型自动着色 3. 默认灰色
+        if node_color_map and entity_id in node_color_map:
+            # 如果节点在颜色映射中，使用指定颜色（固定图谱的节点）
+            node_color = node_color_map[entity_id]
+        elif entity_id in node_relation_counts and node_relation_counts[entity_id]:
+            # 如果节点不在颜色映射中，根据其参与的主要关系类型自动着色（主知识库图谱的节点）
+            main_relation = max(node_relation_counts[entity_id].items(), key=lambda x: x[1])[0]
+            node_color = edge_color_map.get(main_relation, "#888888")
+        else:
+            # 如果节点没有任何关系，使用默认灰色
+            node_color = "#888888"
+        
+        # 构建节点标题
+        title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
+        if node.properties:
+            title += "<br>属性:"
+            for key, value in list(node.properties.items())[:5]:
+                title += f"<br>  {key}: {value}"
+        
+        # 添加节点（固定大小25）
+        net.add_node(
+            entity_id,
+            label=entity_name[:20],
+            title=title,
+            color={
+                "background": node_color,
+                "border": node_color,
+                "highlight": {"background": node_color, "border": "#FFFFFF"},
+                "hover": {"background": node_color, "border": "#FFFFFF"}
+            },
+            font={"color": "#FFFFFF", "size": 14, "face": "Arial"},
+            size=25,  # 固定大小
+            borderWidth=3,
+            borderWidthSelected=5
+        )
+        entity_map[entity_id] = node
+    
+    # 添加边
+    for edge in subgraph.edges:
+        source = str(edge.from_id)
+        target = str(edge.to_id)
+        relation_type = str(edge.label) if edge.label else "Unknown"
+        edge_color = edge_color_map.get(relation_type, "#888888")
+        
+        if source in entity_map and target in entity_map:
+            net.add_edge(
+                source,
+                target,
+                label=relation_type[:15],
+                title=relation_type,
+                color={"color": edge_color, "highlight": "#FFFFFF", "hover": "#FFFFFF"},
+                width=3,
+                arrows={"to": {"enabled": True, "scaleFactor": 1.2, "type": "arrow"}},
+                font={"color": edge_color, "size": 12, "align": "middle"},
+                smooth={"type": "curvedCW", "roundness": 0.2}
+            )
+    
+    # 配置物理引擎
+    net.set_options("""
+    {
+      "physics": {
+        "enabled": true,
+        "barnesHut": {
+          "gravitationalConstant": -10000,
+          "centralGravity": 0.01,
+          "springLength": 400,
+          "springConstant": 0.02,
+          "damping": 0.09
+        },
+        "stabilization": {
+          "enabled": true,
+          "iterations": 300,
+          "updateInterval": 25,
+          "onlyDynamicEdges": false,
+          "fit": true
+        },
+        "adaptiveTimestep": true,
+        "maxVelocity": 50
+      },
+      "interaction": {
+        "hover": true,
+        "tooltipDelay": 200,
+        "zoomView": true,
+        "dragView": true,
+        "dragNodes": true
+      }
+    }
+    """)
+    
+    # 生成HTML到临时文件
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
+        net.save_graph(html_file.name)
+        html_path = html_file.name
+    
+    # 读取并修改HTML内容
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        
+        # 添加稳定后自动禁用物理引擎的代码，并将network实例暴露到window
+        if "new vis.Network" in html_content:
+            replacement = """var network = new vis.Network(container, data, options);
+                    window.__kag_network = network;
+                    network.once("stabilizationIterationsDone", function() {
+                      network.setOptions({physics: {enabled: false}});
+                    });"""
+            html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
+        
+        return html_content
+    finally:
+        try:
+            os.unlink(html_path)
+        except:
+            pass
+
+
 def load_main_knowledge_base(ckpt_dir: Path) -> Optional[SubGraph]:
     """
     从主知识库checkpoint加载所有实体和关系，转换为SubGraph
@@ -956,6 +1298,12 @@ def main():
         st.session_state.main_kb_selected_relation_types = []
     if 'main_kb_search_term' not in st.session_state:
         st.session_state.main_kb_search_term = ""
+    if 'show_fixed_graph' not in st.session_state:
+        st.session_state.show_fixed_graph = True
+    if 'trigger_explosion' not in st.session_state:
+        st.session_state.trigger_explosion = False
+    if 'show_both_graphs' not in st.session_state:
+        st.session_state.show_both_graphs = False
     
     # 自动初始化抽取器（如果尚未初始化）
     if st.session_state.extractor is None:
@@ -1281,17 +1629,6 @@ def main():
     
     # 标签页2: 主知识库展示
     with tab2:
-        st.markdown("""
-        <div class="fade-in">
-            <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
-                📊 主知识库展示
-            </h2>
-            <p style="text-align: center; color: #666; margin-top: -0.5rem;">
-                浏览主知识库 | 可视化展示所有实体和关系
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        
         # 检查checkpoint目录
         project_path = Path(__file__).parent
         ckpt_dir = project_path / "builder" / "ckpt"
@@ -1306,19 +1643,223 @@ def main():
             if subgraph:
                 st.session_state.main_kb_subgraph = subgraph
         
-        # 刷新按钮
-        if st.button("🔄 刷新主知识库", type="primary", use_container_width=True, key="refresh_main_kb"):
+        # 根据show_fixed_graph状态决定显示固定图谱还是知识库图谱
+        if st.session_state.show_fixed_graph:
+            # 显示固定图谱
+            # 创建标题
+            st.markdown("""
+            <div style="position: relative; margin-bottom: 2rem;">
+                <div class="fade-in" style="text-align: center;">
+                    <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; margin: 0;">
+                        📖 美军作战手册
+                    </h2>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 创建固定图谱
+            fixed_graph = create_fixed_manual_graph()
+            
+            # 定义节点颜色映射（中心实体、第一跳、第二跳使用不同颜色）
+            node_color_map = {}
+            center_color = "#FF6B9D"  # 中心实体颜色
+            first_level_color = "#4ECDC4"  # 第一跳实体颜色
+            second_level_color = "#FECA57"  # 第二跳实体颜色
+            
+            # 设置中心实体颜色
+            node_color_map["美军作战手册"] = center_color
+            
+            # 设置第一跳实体颜色
+            first_level_names = [
+                "第一章美军作战思想", "第二章战区战役", "第三章空中战役",
+                "第四章陆军集团军群作战", "第五章陆军军作战", "第六章陆军师战斗",
+                "第七章机械化步兵与坦克营攻防战斗", "第八章机步排攻防战斗"
+            ]
+            for name in first_level_names:
+                node_color_map[name] = first_level_color
+            
+            # 设置第二跳实体颜色
+            for node in fixed_graph.nodes:
+                if node.id not in node_color_map:
+                    node_color_map[node.id] = second_level_color
+            
+            # 定义边颜色映射
+            edge_color_map = {"包含": "#4ECDC4"}
+            
+            # 使用通用可视化函数渲染固定图谱
+            st.markdown("---")
+            
+            # 添加展开按钮容器（使用CSS绝对定位放在右上角）
+            st.markdown("""
+            <div style="position: relative; width: 100%;">
+                <div id="expand-btn-container" style="position: absolute; top: 10px; right: 10px; z-index: 1000;">
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 展开按钮（放在图谱展示区域右上角）
+            if not st.session_state.show_both_graphs:
+                col1, col2 = st.columns([10, 1])
+                with col2:
+                    if st.button("展开", key="expand_compare_btn_top", use_container_width=True):
+                        st.session_state.show_both_graphs = True
+                        st.rerun()
+            
+            # 如果展开对比，将两个图谱合并显示在同一个区域
+            if st.session_state.show_both_graphs:
+                st.markdown("""
+                <div class="fade-in" style="margin: 2rem 0;">
+                    <h2 style="color: #ffffff; text-align: center; font-weight: 700; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">
+                        🎨 图谱对比展示（固定图谱 + 主知识库）
+                    </h2>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 合并固定图谱和主知识库图谱
+                kb_subgraph = st.session_state.main_kb_subgraph
+                if kb_subgraph and (kb_subgraph.nodes or kb_subgraph.edges):
+                    # 合并节点和边
+                    merged_nodes = list(fixed_graph.nodes) + list(kb_subgraph.nodes)
+                    merged_edges = list(fixed_graph.edges) + list(kb_subgraph.edges)
+                    
+                    # 找到固定图谱中的"第七章机械化步兵与坦克营攻防战斗::第三节防御战斗"节点
+                    fixed_defense_node = None
+                    for node in fixed_graph.nodes:
+                        if node.id == "第七章机械化步兵与坦克营攻防战斗::第三节防御战斗":
+                            fixed_defense_node = node
+                            break
+                    
+                    # 找到主知识库中的名称为“1”的节点，与固定图谱的小节建立关联
+                    kb_target_node = None
+                    for node in kb_subgraph.nodes:
+                        try:
+                            node_name = str(node.name).strip() if node.name is not None else ""
+                        except Exception:
+                            node_name = ""
+                        if node_name == "1":
+                            kb_target_node = node
+                            break
+                    
+                    # 如果找到了两个节点，创建连接边
+                    if fixed_defense_node and kb_target_node:
+                        connection_edge = Edge(
+                            _id=f"fixed_defense_to_kb_node1_{fixed_defense_node.id}_{kb_target_node.id}",
+                            from_node=fixed_defense_node,
+                            to_node=kb_target_node,
+                            label="关联",
+                            properties={}
+                        )
+                        merged_edges.append(connection_edge)
+                    
+                    # 创建合并后的SubGraph
+                    merged_graph = SubGraph(nodes=merged_nodes, edges=merged_edges)
+                    
+                    # 合并节点颜色映射（固定图谱使用自定义颜色，知识库图谱根据关系类型自动着色）
+                    merged_node_color_map = node_color_map.copy()  # 先复制固定图谱的颜色映射
+                    # 知识库图谱的节点颜色会在render_graph_visualization中根据关系类型自动确定
+                    
+                    # 合并边颜色映射：传入None让render_graph_visualization自动为所有关系类型分配颜色
+                    # 这样主知识库图谱的关系类型也能获得正确的颜色
+                    merged_edge_color_map = None  # 传入None，让函数自动处理所有关系类型
+                    
+                    try:
+                        merged_html = render_graph_visualization(
+                            subgraph=merged_graph,
+                            node_color_map=merged_node_color_map,  # 固定图谱节点使用指定颜色，其他节点根据关系类型自动着色
+                            edge_color_map=merged_edge_color_map,  # None表示自动为所有关系类型分配颜色
+                            enable_click_handler=False,
+                            target_node_id=None
+                        )
+                        st.components.v1.html(merged_html, height=2450, scrolling=False)
+                    except Exception as e:
+                        st.error(f"生成合并图谱可视化失败: {e}")
+                        import traceback
+                        st.error(traceback.format_exc())
+                else:
+                    st.warning("⚠️ 未找到主知识库数据，只显示固定图谱")
+                    try:
+                        fixed_html = render_graph_visualization(
+                            subgraph=fixed_graph,
+                            node_color_map=node_color_map,
+                            edge_color_map=edge_color_map,
+                            enable_click_handler=False,
+                            target_node_id=None
+                        )
+                        st.components.v1.html(fixed_html, height=2450, scrolling=False)
+                    except Exception as e:
+                        st.error(f"生成固定图谱可视化失败: {e}")
+                
+                # 添加关闭按钮
+                col1, col2 = st.columns([10, 1])
+                with col2:
+                    if st.button("关闭", key="close_compare_btn", use_container_width=True):
+                        st.session_state.show_both_graphs = False
+                        st.rerun()
+            else:
+                # 只显示固定图谱
+                # 创建图谱展示区域容器，包含标题和右上角按钮
+                st.markdown("""
+                <div style="position: relative; margin: 2rem 0;">
+                    <div class="fade-in" style="text-align: center;">
+                        <h2 style="color: #ffffff; text-align: center; font-weight: 700; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">
+                            🎨 知识图谱可视化
+                        </h2>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # 展开按钮（放在图谱上方，右对齐）
+                col1, col2 = st.columns([10, 1])
+                with col2:
+                    if st.button("展开", key="expand_compare_btn_single", use_container_width=True):
+                        st.session_state.show_both_graphs = True
+                        st.rerun()
+                
+                try:
+                    html_content = render_graph_visualization(
+                        subgraph=fixed_graph,
+                        node_color_map=node_color_map,
+                        edge_color_map=edge_color_map,
+                        enable_click_handler=False,
+                        target_node_id=None
+                    )
+
+                    # 显示固定图谱
+                    st.components.v1.html(html_content, height=2450, scrolling=False)
+                except Exception as e:
+                    st.error(f"生成固定图谱可视化失败: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
+
+            # 关键：在展示固定图谱时，不再继续渲染下面的主知识库内容
+            # 只有当点击目标节点触发 switchToKB 并 rerun 后，才会进入 else 分支展示主知识库图谱
+            st.stop()
+        else:
+            # 显示知识库图谱
+            st.markdown("""
+            <div class="fade-in">
+                <h2 style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center;">
+                    📊 主知识库展示
+                </h2>
+                <p style="text-align: center; color: #666; margin-top: -0.5rem;">
+                    浏览主知识库 | 可视化展示所有实体和关系
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 刷新按钮
+            if st.button("🔄 刷新主知识库", type="primary", use_container_width=True, key="refresh_main_kb"):
                 if ckpt_dir.exists():
-                        subgraph = load_main_knowledge_base(ckpt_dir)
-                        if subgraph:
-                            st.session_state.main_kb_subgraph = subgraph
+                    subgraph = load_main_knowledge_base(ckpt_dir)
+                    if subgraph:
+                        st.session_state.main_kb_subgraph = subgraph
                 # 清除可视化缓存，强制重新生成
                 cache_file = Path(__file__).parent / "visualizations" / "main_kb_visualization.html"
                 if cache_file.exists():
                     cache_file.unlink()
-        
-        # 显示主知识库数据
-        subgraph = st.session_state.main_kb_subgraph
+            
+            # 显示主知识库数据
+            subgraph = st.session_state.main_kb_subgraph
         
         if subgraph is None:
             st.info("💡 未找到主知识库数据，请确保已构建知识库。")
@@ -1446,218 +1987,25 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # 使用pyvis创建交互式可视化（使用筛选后的数据）
+            # 使用通用可视化函数渲染知识库图谱（使用筛选后的数据）
             if filtered_nodes or filtered_edges:
                 try:
-                    from pyvis.network import Network
-                    import tempfile
-                    import os
+                    # 创建筛选后的SubGraph
+                    filtered_subgraph = SubGraph(nodes=filtered_nodes, edges=filtered_edges)
                     
-                    # 创建网络图 - 使用深色背景以突出彩色节点
-                    net = Network(
-                        height="2400px",
-                        width="100%",
-                        bgcolor="#1a1a2e",  # 深蓝黑色背景，更炫酷
-                        font_color="white",
-                        directed=True
+                    # 使用通用可视化函数
+                    html_content = render_graph_visualization(
+                        subgraph=filtered_subgraph,
+                        node_color_map=None,  # 使用默认颜色映射（基于关系类型）
+                        edge_color_map=None,  # 使用默认颜色映射
+                        enable_click_handler=False,  # 知识库图谱不需要点击处理
+                        target_node_id=None
                     )
-                    
-                    # 炫酷的关系类型配色方案（高对比度，确保文字清晰）
-                    # 使用现代渐变色系，每个关系类型都有独特的颜色
-                    relation_type_colors = {
-                        # 主要关系类型 - 使用鲜艳但对比度高的颜色
-                        "位于": "#FF6B9D",  # 粉红
-                        "包含": "#4ECDC4",  # 青色
-                        "相邻": "#95E1D3",  # 薄荷绿
-                        "连接": "#FECA57",  # 金黄色
-                        "控制": "#48DBFB",  # 亮蓝色
-                        "支持": "#FF9FF3",  # 粉紫色
-                        "攻击": "#54A0FF",  # 蓝色
-                        "防御": "#5F27CD",  # 紫色
-                        "部署": "#00D2D3",  # 青绿色
-                        "指挥": "#FF6348",  # 橙红色
-                        "隶属": "#FFA502",  # 橙色
-                        "协同": "#A55EEA",  # 紫罗兰
-                        "依赖": "#26DE81",  # 绿色
-                        "影响": "#FD79A8",  # 粉红色
-                        "关联": "#FDCB6E",  # 黄色
-                        "组成": "#6C5CE7",  # 靛蓝色
-                        "属于": "#00B894",  # 翠绿色
-                        "执行": "#E17055",  # 珊瑚色
-                        "负责": "#74B9FF",  # 天蓝色
-                        "监控": "#A29BFE",  # 淡紫色
-                    }
-                    
-                    # 收集所有关系类型并分配颜色
-                    all_relation_types = sorted(set([str(e.label) for e in filtered_edges if e.label]))
-                    relation_color_map = {}
-                    default_colors = [
-                        "#FF6B9D", "#4ECDC4", "#95E1D3", "#FECA57", "#48DBFB",
-                        "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF6348",
-                        "#FFA502", "#A55EEA", "#26DE81", "#FD79A8", "#FDCB6E",
-                        "#6C5CE7", "#00B894", "#E17055", "#74B9FF", "#A29BFE",
-                        "#FF7675", "#55EFC4", "#81ECEC", "#FAB1A0", "#E17055"
-                    ]
-                    
-                    for idx, rel_type in enumerate(all_relation_types):
-                        if rel_type in relation_type_colors:
-                            relation_color_map[rel_type] = relation_type_colors[rel_type]
-                        else:
-                            # 为未定义的关系类型分配颜色
-                            relation_color_map[rel_type] = default_colors[idx % len(default_colors)]
-                    
-                    # 统计每个节点参与的关系类型（用于确定节点颜色）
-                    node_relation_counts = {}  # {node_id: {relation_type: count}}
-                    for edge in filtered_edges:
-                        source = str(edge.from_id)
-                        target = str(edge.to_id)
-                        relation_type = str(edge.label) if edge.label else "Unknown"
-                        
-                        if source not in node_relation_counts:
-                            node_relation_counts[source] = {}
-                        if target not in node_relation_counts:
-                            node_relation_counts[target] = {}
-                        
-                        node_relation_counts[source][relation_type] = node_relation_counts[source].get(relation_type, 0) + 1
-                        node_relation_counts[target][relation_type] = node_relation_counts[target].get(relation_type, 0) + 1
-                    
-                    # 添加节点（使用筛选后的节点）
-                    entity_map = {}
-                    for node in filtered_nodes:
-                        entity_id = str(node.id)
-                        entity_name = str(node.name) if node.name else entity_id
-                        entity_type = str(node.label) if node.label else "Unknown"
-                        
-                        # 根据节点参与的主要关系类型确定颜色
-                        if entity_id in node_relation_counts and node_relation_counts[entity_id]:
-                            # 找到最常见的关系类型
-                            main_relation = max(node_relation_counts[entity_id].items(), key=lambda x: x[1])[0]
-                            node_color = relation_color_map.get(main_relation, "#888888")
-                        else:
-                            # 如果没有关系，使用默认颜色
-                            node_color = "#888888"
-                        
-                        # 构建节点标题（显示详细信息）
-                        title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
-                        if node.properties:
-                            title += "<br>属性:"
-                            for key, value in list(node.properties.items())[:5]:  # 只显示前5个属性
-                                title += f"<br>  {key}: {value}"
-                        
-                        # 设置节点样式：使用渐变色边框，内部填充色，白色文字
-                        net.add_node(
-                            entity_id,
-                            label=entity_name[:20],  # 限制标签长度
-                            title=title,
-                            color={
-                                "background": node_color,
-                                "border": node_color,
-                                "highlight": {
-                                    "background": node_color,
-                                    "border": "#FFFFFF"
-                                },
-                                "hover": {
-                                    "background": node_color,
-                                    "border": "#FFFFFF"
-                                }
-                            },
-                            font={"color": "#FFFFFF", "size": 14, "face": "Arial"},
-                            size=25,
-                            borderWidth=3,
-                            borderWidthSelected=5
-                        )
-                        entity_map[entity_id] = node
-                    
-                    # 添加边（使用筛选后的边，根据关系类型设置颜色）
-                    for edge in filtered_edges:
-                        source = str(edge.from_id)
-                        target = str(edge.to_id)
-                        relation_type = str(edge.label) if edge.label else "Unknown"
-                        edge_color = relation_color_map.get(relation_type, "#888888")
-                        
-                        if source in entity_map and target in entity_map:
-                            net.add_edge(
-                                source,
-                                target,
-                                label=relation_type[:15],  # 限制标签长度
-                                title=relation_type,
-                                color={
-                                    "color": edge_color,
-                                    "highlight": "#FFFFFF",
-                                    "hover": "#FFFFFF"
-                                },
-                                width=3,
-                                arrows={
-                                    "to": {
-                                        "enabled": True,
-                                        "scaleFactor": 1.2,
-                                        "type": "arrow"
-                                    }
-                                },
-                                font={"color": edge_color, "size": 12, "align": "middle"},
-                                smooth={"type": "curvedCW", "roundness": 0.2}
-                            )
-                    
-                    # 配置物理引擎 - 先稳定布局，然后禁用让图保持静止
-                    net.set_options("""
-                    {
-                      "physics": {
-                        "enabled": true,
-                        "barnesHut": {
-                          "gravitationalConstant": -10000,
-                          "centralGravity": 0.01,
-                          "springLength": 400,
-                          "springConstant": 0.02,
-                          "damping": 0.09
-                        },
-                        "stabilization": {
-                          "enabled": true,
-                          "iterations": 300,
-                          "updateInterval": 25,
-                          "onlyDynamicEdges": false,
-                          "fit": true
-                        },
-                        "adaptiveTimestep": true,
-                        "maxVelocity": 50
-                      },
-                      "interaction": {
-                        "hover": true,
-                        "tooltipDelay": 200,
-                        "zoomView": true,
-                        "dragView": true,
-                        "dragNodes": true
-                      }
-                    }
-                    """)
-                    
-                    # 生成HTML到临时文件
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
-                        net.save_graph(html_file.name)
-                        html_path = html_file.name
-                    
-                    # 读取HTML内容并修改，添加稳定后自动禁用物理引擎的代码
-                    try:
-                        with open(html_path, "r", encoding="utf-8") as f:
-                            html_content = f.read()
-                        
-                        # 在network初始化后添加监听器，稳定后自动禁用物理引擎
-                        # 查找network初始化代码的位置
-                        if "new vis.Network" in html_content:
-                            # 在network创建后添加事件监听器
-                            replacement = """var network = new vis.Network(container, data, options);
-                    network.once("stabilizationIterationsDone", function() {
-                      network.setOptions({physics: {enabled: false}});
-                    });"""
-                            html_content = html_content.replace("var network = new vis.Network(container, data, options);", replacement, 1)
-                        
-                        # 在Streamlit中显示
-                        st.components.v1.html(html_content, height=2450, scrolling=False)
-                    finally:
-                        # 清理临时文件
-                        try:
-                            os.unlink(html_path)
-                        except:
-                            pass
+                    st.components.v1.html(html_content, height=2450, scrolling=False)
+                except Exception as e:
+                    st.error(f"生成知识库图谱可视化失败: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
                     
                     # 原文对照部分 - 使用分段卡片展示（在try块内，finally块之后）
                     st.markdown("---")

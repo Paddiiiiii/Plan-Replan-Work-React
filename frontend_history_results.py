@@ -194,7 +194,7 @@ def render_history_results_tab(api_url: str):
                                         
                                         if HISTORY_DISPLAY_CONFIG.get("show_llm_thinking", True):
                                             st.markdown("---")
-                                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=True):
+                                            with st.expander("📋 知识抽取问答结果与智能体思考过程", expanded=True):
                                                 kag_qa_results = metadata.get("kag_qa_results", [])
                                                 if kag_qa_results:
                                                     st.subheader("知识抽取知识召回结果")
@@ -207,14 +207,14 @@ def render_history_results_tab(api_url: str):
                                                         st.markdown("---")
                                                 
                                                 if metadata.get("first_llm_response"):
-                                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
+                                                    st.subheader("第一轮智能体思考（工具选择和参数提取）")
                                                     first_response = metadata.get("first_llm_response", "")
                                                     MAX_RESPONSE_LENGTH = 50000
                                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 智能体响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第一轮大模型响应",
+                                                        "第一轮智能体响应",
                                                         value=first_response,
                                                         height=200,
                                                         key=f"first_llm_response_history_{selected_filename}",
@@ -222,13 +222,13 @@ def render_history_results_tab(api_url: str):
                                                     )
                                                 
                                                 if metadata.get("second_llm_response"):
-                                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
+                                                    st.subheader("第二轮智能体思考（工具调用计划编织）")
                                                     second_response = metadata.get("second_llm_response", "")
                                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                                        st.warning(f"⚠️ 智能体响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                                     st.text_area(
-                                                        "第二轮大模型响应",
+                                                        "第二轮智能体响应",
                                                         value=second_response,
                                                         height=200,
                                                         key=f"second_llm_response_history_{selected_filename}",
@@ -347,7 +347,7 @@ def render_history_results_tab(api_url: str):
                         
                         if HISTORY_DISPLAY_CONFIG.get("show_llm_thinking", True):
                             st.markdown("---")
-                            with st.expander("📋 知识抽取问答结果与大模型思考过程", expanded=True):
+                            with st.expander("📋 知识抽取问答结果与智能体思考过程", expanded=True):
                                 kag_qa_results = metadata.get("kag_qa_results", [])
                                 if kag_qa_results:
                                     st.subheader("知识抽取知识召回结果")
@@ -360,14 +360,14 @@ def render_history_results_tab(api_url: str):
                                         st.markdown("---")
                                 
                                 if metadata.get("first_llm_response"):
-                                    st.subheader("第一轮大模型思考（工具选择和参数提取）")
+                                    st.subheader("第一轮智能体思考（工具选择和参数提取）")
                                     first_response = metadata.get("first_llm_response", "")
                                     MAX_RESPONSE_LENGTH = 50000
                                     if len(first_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ 大模型响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 智能体响应较长（{len(first_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         first_response = first_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第一轮大模型响应",
+                                        "第一轮智能体响应",
                                         value=first_response,
                                         height=200,
                                         key=f"first_llm_response_history_{selected_filename}",
@@ -375,13 +375,13 @@ def render_history_results_tab(api_url: str):
                                     )
                                 
                                 if metadata.get("second_llm_response"):
-                                    st.subheader("第二轮大模型思考（工具调用计划编织）")
+                                    st.subheader("第二轮智能体思考（工具调用计划编织）")
                                     second_response = metadata.get("second_llm_response", "")
                                     if len(second_response) > MAX_RESPONSE_LENGTH:
-                                        st.warning(f"⚠️ 大模型响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
+                                        st.warning(f"⚠️ 智能体响应较长（{len(second_response)}字符），仅显示前{MAX_RESPONSE_LENGTH}字符")
                                         second_response = second_response[:MAX_RESPONSE_LENGTH] + "\n\n...（内容已截断）"
                                     st.text_area(
-                                        "第二轮大模型响应",
+                                        "第二轮智能体响应",
                                         value=second_response,
                                         height=200,
                                         key=f"second_llm_response_history_{selected_filename}",

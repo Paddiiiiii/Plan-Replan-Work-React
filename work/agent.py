@@ -1394,20 +1394,6 @@ class WorkAgent:
                             ax=ax
                         )
                         
-                        # 添加图例
-                        unique_types = set(G.nodes[node].get('type', 'Unknown') for node in G.nodes())
-                        legend_elements = []
-                        for entity_type in unique_types:
-                            color = entity_type_colors.get(entity_type, '#6C757D')
-                            legend_elements.append(
-                                plt.Line2D([0], [0], marker='o', color='w', label=entity_type, 
-                                          markerfacecolor=color, markersize=10, markeredgewidth=2, markeredgecolor='white')
-                            )
-                        
-                        if legend_elements:
-                            ax.legend(handles=legend_elements, loc='upper right', bbox_to_anchor=(1.25, 1), 
-                                     title="实体类型", fontsize=9, title_fontsize=10)
-                        
                         ax.set_title(f'实体关系图 ({len(retrieved_entities)} 个实体, {len(retrieved_relations)} 个关系)', 
                                    fontsize=18, fontweight='bold', pad=20, fontfamily='Microsoft YaHei')
                         ax.axis('off')
@@ -1419,7 +1405,7 @@ class WorkAgent:
                         kg_graph_images_dir.mkdir(parents=True, exist_ok=True)
                         kg_graph_image_path = kg_graph_images_dir / kg_graph_image_filename
                         
-                        plt.tight_layout(rect=[0, 0, 0.8, 1])
+                        plt.tight_layout()
                         plt.savefig(kg_graph_image_path, dpi=180, bbox_inches='tight', facecolor='white')
                         plt.close(fig)
                         
