@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Body  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 from pydantic import BaseModel, Field  # type: ignore
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 import uvicorn  # type: ignore
 import threading
 from pathlib import Path
@@ -64,18 +64,231 @@ def get_context_manager():
     return context_manager
 
 class TaskRequest(BaseModel):
-    task: str = Field(..., description="任务描述")
+    """提交智能体任务的请求体"""
+
+    task: str = Field(
+        ...,
+        description="任务描述，例如：'为轻步兵选择合适的部署区域（高程适中、坡度较小、靠近道路且便于防御）'",
+        example="为步兵寻找适合部署的位置，需要兼顾防护和观察条件",
+    )
+
 
 class PlanRequest(BaseModel):
-    task: str = Field(..., description="任务描述")
+    """仅生成执行计划的请求体"""
+
+    task: str = Field(
+        ...,
+        description="任务描述，将用于调用KAG+LLM生成计划",
+        example="为轻步兵选择合适的部署区域（高程适中、坡度较小、靠近道路且便于防御）",
+    )
+
+
+class SourceText(BaseModel):
+    """从KAG检索到的原文片段"""
+
+    title: str = Field("", description="来源标题")
+    content: str = Field("", description="文本内容")
+    chunk_id: str = Field("", description="片段ID")
+    score: float = Field(0, description="相关性得分")
+
+
+class RetrievedEntity(BaseModel):
+    """从KAG结果中抽取的实体"""
+
+    id: str = Field(..., description="实体ID或名称")
+    name: str = Field(..., description="实体名称")
+    type: str = Field(..., description="实体类型，例如 MilitaryUnit、TerrainFeature 等")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="实体属性字典"
+    )
+
+
+class RetrievedRelation(BaseModel):
+    """从KAG结果中抽取的关系"""
+
+    source: str = Field(..., description="源实体ID")
+    target: str = Field(..., description="目标实体ID")
+    type: str = Field(..., description="关系类型，例如 deployedAt、suitableFor 等")
+    properties: Dict[str, Any] = Field(
+        default_factory=dict, description="关系属性字典"
+    )
+
+
+class KagResultItem(BaseModel):
+    """单个KAG问答结果"""
+
+    question: str = Field(..., description="子问题")
+    answer: str = Field("", description="KAG 返回的答案（已做清洗）")
+    input_query: str = Field(
+        "", description="实际发送给KAG的查询（通常与 question 相同）"
+    )
+    references: List[str] = Field(
+        default_factory=list, description="答案引用的参考信息（可选）"
+    )
+    source_texts: List[SourceText] = Field(
+        default_factory=list, description="检索到的原文片段列表"
+    )
+    # tasks 结构较为复杂且依赖底层KAG实现，这里保持为 Any，仍然给出字段名约束
+    tasks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="KAG 内部推理任务列表，结构与底层KAG实现保持一致",
+    )
+
+
+class ToolStep(BaseModel):
+    """单个工具调用步骤（由 WorkAgent 生成或外部显式指定）"""
+
+    step_id: int = Field(..., description="步骤序号（从1开始的正整数）", example=1)
+    type: Literal[
+        "buffer",
+        "elevation",
+        "slope",
+        "vegetation",
+        "relative_position",
+        "distance",
+        "area",
+    ] = Field(
+        ...,
+        description="步骤类型（会自动映射到具体工具）",
+        example="relative_position",
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description="该步骤的人类可读描述，例如：'以迫击炮排为参考点，筛选前方 1000 米范围内坡度小于 10° 的区域'",
+    )
+    tool: Optional[str] = Field(
+        default=None,
+        description="可选：直接指定底层工具名，如 'relative_position_filter_tool'。一般只需要填 type 即可。",
+    )
+    params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "工具参数字典，例如：\n"
+            "{\n"
+            '  "reference_point": {"lon": 118.519, "lat": 31.5515},\n'
+            '  "reference_direction": 0,\n'
+            '  "position_types": ["front"],\n'
+            '  "utm_crs": "EPSG:32650"\n'
+            "}"
+        ),
+    )
+    is_default: Optional[bool] = Field(
+        default=False,
+        description="是否表示该步骤使用的是工具默认参数（前端只做提示，不写入筛选参数列表）",
+    )
+
+
+class SubPlan(BaseModel):
+    """多任务模式下，面向某个单位的子计划"""
+
+    unit: str = Field(..., description="单位名称，例如 '迫击炮排'、'装甲反坦克排'")
+    steps: List[ToolStep] = Field(
+        ..., description="该单位对应的工具调用步骤列表（按 step_id 顺序执行）"
+    )
+
+
+class PlanSchema(BaseModel):
+    """
+    执行计划的结构（/api/plan 返回的 plan 字段，/api/execute 的输入）
+    """
+
+    original_query: str = Field(..., description="原始用户任务描述")
+    sub_questions: List[str] = Field(
+        default_factory=list, description="拆分得到的子问题列表（当前通常只包含原始问题）"
+    )
+    kag_results: List[KagResultItem] = Field(
+        default_factory=list, description="每个子问题对应的 KAG 问答结果"
+    )
+    combined_kag_answers: str = Field(
+        "",
+        description="将所有子问题答案合并后的长文本，用于后续LLM处理或审查",
+    )
+    retrieved_entities: List[RetrievedEntity] = Field(
+        default_factory=list, description="从 KAG 结果中抽取的实体列表"
+    )
+    retrieved_relations: List[RetrievedRelation] = Field(
+        default_factory=list, description="从 KAG 结果中抽取的关系列表"
+    )
+    # ========= WorkAgent 生成的工具调用计划（执行工具+参数） =========
+    steps: Optional[List[ToolStep]] = Field(
+        default=None,
+        description=(
+            "单任务模式下的工具调用步骤列表。\n"
+            "如果为空，则 WorkAgent 会基于 original_query + combined_kag_answers 自动生成。"
+        ),
+    )
+    sub_plans: Optional[List[SubPlan]] = Field(
+        default=None,
+        description=(
+            "多任务模式下的子计划列表，每个子计划面向一个作战单位。\n"
+            "与 steps 二选一：若提供 sub_plans，则忽略顶层 steps。"
+        ),
+    )
+    # ========= LLM 思考过程文本（用于前端展示，不影响执行） =========
+    first_llm_response: Optional[str] = Field(
+        default=None, description="第一轮智能体思考原文（工具选择和参数提取）"
+    )
+    second_llm_response: Optional[str] = Field(
+        default=None, description="第二轮智能体思考原文（工具调用计划编织）"
+    )
+
 
 class ExecuteRequest(BaseModel):
-    plan: Dict[str, Any] = Field(..., description="执行计划")
+    """执行计划的请求体"""
+
+    plan: PlanSchema = Field(
+        ...,
+        description=(
+            "要执行的计划结构：\n"
+            "1）可以直接传入 /api/plan 返回的 plan（只有 KAG 相关字段，系统会自动生成 steps）；\n"
+            "2）也可以传入已经包含 steps/sub_plans 的完整工具计划，系统将直接按该计划执行。"
+        ),
+        example={
+            "original_query": "为步兵寻找适合部署的位置",
+            "sub_questions": ["为步兵寻找适合部署的位置"],
+            "steps": [
+                {
+                    "step_id": 1,
+                    "type": "relative_position",
+                    "description": "以迫击炮排为参考点，筛选前方 1000 米范围内区域",
+                    "params": {
+                        "reference_point": {"lon": 118.519, "lat": 31.5515},
+                        "reference_direction": 0,
+                        "position_types": ["front"],
+                        "utm_crs": "EPSG:32650",
+                    },
+                },
+                {
+                    "step_id": 2,
+                    "type": "area",
+                    "description": "筛选面积大于 0.5 平方公里的区域",
+                    "params": {"min_area_km2": 0.5},
+                },
+            ],
+        },
+    )
+
+
+class KagQueryRequest(BaseModel):
+    """KAG 问答请求体"""
+
+    question: str = Field(
+        ...,
+        description="要进行KAG推理的问题",
+        example="轻步兵应该部署在什么位置？",
+    )
+
 
 class TaskResponse(BaseModel):
-    success: bool
-    result: Dict[str, Any]
-    message: Optional[str] = None
+    """通用任务响应结构"""
+
+    success: bool = Field(..., description="是否执行成功")
+    result: Dict[str, Any] = Field(
+        default_factory=dict, description="具体结果内容，结构因接口而异"
+    )
+    message: Optional[str] = Field(
+        default=None, description="可读性消息，如 '计划生成完成'、'执行完成' 等"
+    )
 
 
 @app.get("/")
@@ -150,7 +363,10 @@ async def execute_plan(request: ExecuteRequest):
     最终生成GeoJSON格式的结果文件。
     """
     try:
-        result = get_orchestrator().execute_plan(request.plan)
+        # 将 Pydantic 模型转换为普通字典，排除值为 None 的字段，
+        # 保持与 Orchestrator/WorkAgent 现有实现兼容（避免 steps/sub_plans 为 None 触发旧格式分支）
+        plan_dict = request.plan.dict(exclude_none=True)
+        result = get_orchestrator().execute_plan(plan_dict)
         return TaskResponse(
             success=result.get("success", False),
             result=result,
@@ -299,19 +515,19 @@ async def get_kg_relations(relation_type: str = None, limit: int = 100):
         raise HTTPException(status_code=500, detail=f"获取关系失败: {str(e)}")
 
 @app.post("/api/kag/query", tags=["知识图谱"])
-async def kag_query(request: Dict = Body(...)):
+async def kag_query(request: KagQueryRequest):
     """
     使用KAG推理能力回答问题
-    
+
     基于知识图谱进行推理问答，返回结构化答案和引用来源。
-    
-    请求体：
+
+    请求体（KagQueryRequest）示例：
     ```json
     {
         "question": "轻步兵应该部署在什么位置？"
     }
     ```
-    
+
     返回：
     ```json
     {
@@ -323,13 +539,13 @@ async def kag_query(request: Dict = Body(...)):
     ```
     """
     try:
-        question = request.get("question", "")
+        question = request.question
         if not question:
             raise HTTPException(status_code=400, detail="问题不能为空")
-        
+
         context_manager = get_context_manager()
         result = context_manager.query_with_kag_reasoning(question)
-        
+
         return {
             "success": True,
             "answer": result.get("answer", ""),

@@ -50,8 +50,6 @@ KAG_CONFIG = {
     "embedding_model": EMBEDDING_MODEL
 }
 
-RAG_CONFIG = KAG_CONFIG
-
 # 地理边界限制（经纬度范围）
 GEO_BOUNDS = {
     "min_lon": 118.0,  # 西经
@@ -70,10 +68,10 @@ HISTORY_DISPLAY_CONFIG = {
 
 # 工具启用配置（控制哪些工具可以被调用）
 TOOL_ENABLE_CONFIG = {
-    "buffer_filter_tool": False,              # 缓冲区筛选工具
+    "buffer_filter_tool": True,              # 缓冲区筛选工具
     "elevation_filter_tool": True,           # 高程筛选工具
-    "slope_filter_tool": False,               # 坡度筛选工具
-    "vegetation_filter_tool": False,          # 植被筛选工具
+    "slope_filter_tool": True,               # 坡度筛选工具
+    "vegetation_filter_tool": True,          # 植被筛选工具
     "relative_position_filter_tool": True,   # 相对位置筛选工具
     "distance_filter_tool": True,            # 距离筛选工具
     "area_filter_tool": True                 # 面积筛选工具

@@ -17,6 +17,13 @@
         "**/*.pyc": true
     },
     "python.envFile": "${workspaceFolder}/.env",
-    "python.languageServer": "None"
+    "python.languageServer": "None",
+    "cursorpyright.analysis.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/KAG"
+    ],
+    "cursorpyright.analysis.include": [
+        "${workspaceFolder}/KAG"
+    ]
 }
 

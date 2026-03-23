@@ -23,7 +23,7 @@ except Exception:
     pass
 
 SERVER_IP = get_server_ip()
-API_URL = f"http://{SERVER_IP}:8000"
+API_URL = f"http://{SERVER_IP}:8456"
 
 from frontend_agent_task import render_agent_task_tab
 from frontend_history_results import render_history_results_tab

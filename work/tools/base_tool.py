@@ -88,18 +88,30 @@ class BaseTool(ABC):
         
         gdf_utm = gdf.to_crs(f'EPSG:{epsg_code}')
         
+        # 根据总面积自适应选择网格大小，避免大区域产生百万级多边形导致卡死
+        total_area_km2 = gdf_utm.geometry.area.sum() / 1e6
+        if total_area_km2 > 1000:
+            # 超过1000km²：使用500m网格，约4000-20000个单元
+            grid_size = 500.0
+            effective_max_area_km2 = 0.25
+        elif total_area_km2 > 100:
+            # 100-1000km²：使用200m网格
+            grid_size = 200.0
+            effective_max_area_km2 = 0.04
+        else:
+            # 小于100km²：使用90m网格（原逻辑）
+            grid_size = 90.0
+            effective_max_area_km2 = max_area_km2
+        
         subdivided_geometries = []
         subdivided_data = []
-        
-        # 固定网格大小为90米（对应30m和90m数据精度）
-        grid_size = 90.0  # 米
         
         for idx, row in gdf_utm.iterrows():
             geom = row.geometry
             area_km2 = geom.area / 1000000  # 转换为平方公里
             
             # 如果区域面积小于阈值，直接保留
-            if area_km2 <= max_area_km2:
+            if area_km2 <= effective_max_area_km2:
                 subdivided_geometries.append(geom)
                 # 保存其他属性
                 row_dict = row.to_dict()

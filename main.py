@@ -14,16 +14,12 @@ if str(BASE_DIR_PARENT) not in sys.path:
 
 def run_api_server():
     try:
-        from api_server import run_api_server
-        run_api_server(port=8000)
-    except ImportError:
-        try:
-            from api_server import run_api_server
-            run_api_server(port=8000)
-        except Exception as e:
-            print(f"启动API服务器失败: {e}")
-            import traceback
-            traceback.print_exc()
+        from api_server import run_api_server as _run_api_server
+        _run_api_server(port=8456)
+    except Exception as e:
+        print(f"启动API服务器失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 def check_port(port):
     import socket
@@ -98,9 +94,9 @@ if __name__ == "__main__":
             return "localhost"
     
     server_ip = get_server_ip()
-    print("✓ 后端API服务启动中: http://localhost:8000")
-    print(f"✓ 后端API服务（局域网）: http://{server_ip}:8000")
-    print("✓ API文档: http://localhost:8000/docs")
+    print("✓ 后端API服务启动中: http://localhost:8456")
+    print(f"✓ 后端API服务（局域网）: http://{server_ip}:8456")
+    print("✓ API文档: http://localhost:8456/docs")
     time.sleep(3)
     
     print("✓ 前端界面启动中...")

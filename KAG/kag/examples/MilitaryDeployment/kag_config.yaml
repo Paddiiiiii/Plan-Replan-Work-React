@@ -23,18 +23,18 @@ chat_llm: &chat_llm
   max_tokens: 4096
   enable_check: false
 
-# 带限流的Embedding模型配置（直接在openai模型中实现限流）
-# 使用在线API，通过速率限制避免超限
+# 本地Ollama Embedding模型配置
+# 使用192.168.1.200上的Ollama服务中的bge-large模型
 vectorize_model: &vectorize_model
-  api_key: sk-xtpojqrgbqomvlyvtlvpmwbjfpwynbbrqsekxvotxkoxqerw
-  base_url: https://api.siliconflow.cn/v1
-  model: BAAI/bge-large-zh-v1.5
-  type: openai
+  type: ollama
+  base_url: http://192.168.1.200:11434
+  model: bge-large:latest
   vector_dimensions: 1024
-  max_rate: 30  # 每秒最大30个请求，降低频率避免超限
-  time_period: 1.0
-  max_chars: 600  # 保守估计，中文1 token ≈ 1-2字符，4000字符约8000 tokens
+  timeout: 300
   enable_check: false
+  max_rate: 1000  # Ollama本地服务可以支持更高的请求速率
+  time_period: 1.0
+  batch_size: 8  # 批处理大小
 vectorizer: *vectorize_model
 
 # 本地模型配置（已停用，如需使用请取消注释并注释掉上面的在线配置）
@@ -60,7 +60,9 @@ log:
   level: INFO
 project:
   biz_scene: default
-  host_addr: http://192.168.1.131:8887
+  # OpenSPG 服务（本机 Docker：deploy/openspg/docker-compose.yml → 127.0.0.1:8887）
+  # 也可用环境变量 KAG_PROJECT_HOST_ADDR 覆盖，无需改文件
+  host_addr: http://127.0.0.1:8887
   id: '1'
   language: zh
   namespace: MilitaryDeploy

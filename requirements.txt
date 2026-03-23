@@ -12,6 +12,8 @@ folium>=0.14.0
 pydantic>=2.0.0
 matplotlib>=3.7.0
 networkx>=3.1.0
+# knext 导入链会加载 SLS Scanner，依赖此包；安装损坏时只有 aliyun/log/version.py 会报 logclient 缺失
+aliyun-log-python-sdk==0.8.8
 # OpenSPG KAG SDK (需要从GitHub安装: git clone https://github.com/OpenSPG/KAG.git && cd KAG && pip install -e .)
 # openspg-kag>=0.1.0
 
